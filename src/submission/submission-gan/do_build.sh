@@ -35,8 +35,8 @@ echo "Staging model from : $MODEL_WEIGHTS_DIR"
 echo "Staging target     : $STAGING_DIR"
 
 # Clean and recreate staging directory
-rm -rf "$STAGING_DIR"
-mkdir -p "$STAGING_DIR"
+#rm -rf "$STAGING_DIR"
+#mkdir -p "$STAGING_DIR"
 
 # Copy model files, excluding:
 #   input/         — large sample PNG images not needed in the container
