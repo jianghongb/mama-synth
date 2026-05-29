@@ -265,7 +265,18 @@ def run() -> int:
     print(f"  z-score range: [{float(arr.min()):.3f}, {float(arr.max()):.3f}]")
 
     # ---- 4. Z-score → PNG [0, 255] -----------------------------------
-    png_arr, raw_min, raw_max = zscore_to_png(arr, mean, std)
+    # Detect if input is raw intensity (uint16 or values clearly not z-score)
+    is_raw_input = (arr.dtype == np.uint16) or (arr.min() >= 0 and arr.max() > 50)
+    if is_raw_input:
+        print("  Detected raw intensity input (not z-score). Using direct min-max scaling.")
+        raw = arr.astype(np.float64)
+        raw_min, raw_max = float(raw.min()), float(raw.max())
+        if raw_max > raw_min:
+            png_arr = ((raw - raw_min) / (raw_max - raw_min) * 255).astype(np.uint8)
+        else:
+            png_arr = np.full_like(raw, 128, dtype=np.uint8)
+    else:
+        png_arr, raw_min, raw_max = zscore_to_png(arr, mean, std)
     print(f"  Raw intensity range: [{raw_min:.1f}, {raw_max:.1f}]")
 
     # Convert to PIL; resize to MODEL_SIZE×MODEL_SIZE for the GAN
@@ -351,14 +362,25 @@ def run() -> int:
         out_png_arr = np.array(pil_out, dtype=np.float32)  # [H, W], [0, 255]
 
         # ---- 7. PNG → z-score float32 --------------------------------
-        z_out = png_to_zscore(out_png_arr, raw_min, raw_max, mean, std)
+        if is_raw_input:
+            # For raw input: scale output back to raw range, then z-score
+            raw_out = out_png_arr / 255.0 * (raw_max - raw_min) + raw_min
+            z_out = ((raw_out - mean) / std).astype(np.float32)
+        else:
+            z_out = png_to_zscore(out_png_arr, raw_min, raw_max, mean, std)
         print(
             f"  Output z-score range: [{float(z_out.min()):.3f}, {float(z_out.max()):.3f}]"
         )
 
     # ---- 8. Write output .mha preserving input metadata --------------
     out_sitk = sitk.GetImageFromArray(z_out)
-    out_sitk.CopyInformation(sitk_img)  # preserves spacing, origin, direction
+    # Only copy metadata if dimensions match; otherwise set spacing manually
+    if out_sitk.GetDimension() == sitk_img.GetDimension():
+        out_sitk.CopyInformation(sitk_img)
+    else:
+        # Input was read as 3D but output is 2D — copy spacing for available dims
+        spacing = sitk_img.GetSpacing()[:out_sitk.GetDimension()]
+        out_sitk.SetSpacing(spacing)
 
     out_dir_gc = OUTPUT_PATH / "images" / OUTPUT_SLUG
     out_dir_gc.mkdir(parents=True, exist_ok=True)
