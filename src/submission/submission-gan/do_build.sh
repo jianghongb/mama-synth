@@ -55,6 +55,9 @@ rsync -a \
     --exclude='test.sh' \
     "$MODEL_WEIGHTS_DIR/" "$STAGING_DIR/"
 
+# Ensure the git-tracked __init__.py is not overwritten by the weights dir
+git checkout -- "$STAGING_DIR/__init__.py" 2>/dev/null || true
+
 echo ""
 echo "Staged files:"
 find "$STAGING_DIR" -type f | sort | grep -v __pycache__

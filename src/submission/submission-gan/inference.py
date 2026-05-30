@@ -250,9 +250,14 @@ def run() -> int:
     sitk_img = sitk.ReadImage(str(input_file))
     arr = sitk.GetArrayFromImage(sitk_img)  # [H, W] or [1, H, W]
 
-    # Squeeze a leading size-1 dimension (SimpleITK may add one for .mha)
-    if arr.ndim == 3 and arr.shape[0] == 1:
-        arr = arr[0]
+    # Handle 3-D inputs: squeeze single-slice or take middle slice of a volume
+    if arr.ndim == 3:
+        if arr.shape[0] == 1:
+            arr = arr[0]
+        else:
+            mid = arr.shape[0] // 2
+            print(f"  3-D volume detected ({arr.shape}); using middle slice [{mid}]")
+            arr = arr[mid]
     if arr.ndim != 2:
         print(
             f"ERROR: expected 2-D input, got shape {arr.shape}",
