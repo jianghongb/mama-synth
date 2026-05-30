@@ -96,6 +96,40 @@ output/
     report.csv          ← per-patient preprocessing report
 ```
 
+**Step 3 (optional): Preprocess with train/test split**:
+
+To preprocess and split data into train/test directories in one step according to `train_test_splits.csv`:
+
+```bash
+python src/preprocessing/preprocess_split.py \
+    --image_dir ./images \
+    --seg_dir ./segmentations/automatic \
+    --output_dir ./data_split \
+    --splits_csv ./train_test_splits.csv \
+    --global_stats ./src/preprocessing/training_pre_stats.json \
+    --skip_ambiguous_shapes
+```
+
+Output layout:
+
+```
+data_split/
+    train/
+        mha/
+            input/          ← pre-contrast 2-D .mha slices (training set)
+            ground_truth/   ← peak-enhancement 2-D .mha slices
+            mask/           ← tumour segmentation 2-D .mha slices
+        png/
+        intensity_plots/
+        report.csv
+    test/
+        mha/
+            input/          ← pre-contrast 2-D .mha slices (test set)
+            ground_truth/
+            mask/
+        report.csv
+```
+
 > **⚠️ Note:** PNGs are for visualisation only and are **not** normalised as required by the challenge evaluation. Always use the `.mha` files for model training and submission.
 
 ---
