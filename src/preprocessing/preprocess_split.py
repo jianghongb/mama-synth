@@ -61,9 +61,30 @@ def main():
     parser.add_argument("--splits_csv", required=True)
     parser.add_argument("--global_stats", required=True)
     parser.add_argument("--skip_ambiguous_shapes", action="store_true", default=False)
+    parser.add_argument("--target_size", type=int, default=None,
+                        help="Resize all output slices to target_size x target_size (e.g. 448)")
+    parser.add_argument("--exclude_list", default=None,
+                        help="Path to a text file listing patient IDs to exclude (e.g. motion_summary.txt)")
     args = parser.parse_args()
 
     splits = load_splits(Path(args.splits_csv))
+
+    # Load exclusion list
+    exclude = set()
+    if args.exclude_list:
+        import re
+        with open(args.exclude_list) as f:
+            text = f.read()
+        matches = re.findall(r'^\s+(\S+):\s+\d+', text, re.MULTILINE)
+        if matches:
+            exclude = set(matches)
+        else:
+            exclude = set(line.strip() for line in text.strip().splitlines() if line.strip())
+        # Remove excluded patients from splits
+        before = len(splits)
+        splits = {pid: s for pid, s in splits.items() if pid not in exclude}
+        logger.info(f"Excluded {before - len(splits)} motion cases from splits")
+
     logger.info(f"Loaded splits: {sum(1 for v in splits.values() if v=='train')} train, "
                 f"{sum(1 for v in splits.values() if v=='test')} test")
 
@@ -95,6 +116,7 @@ def main():
             csv_output_path=str(split_dir / "report.csv"),
             global_stats_path=args.global_stats,
             skip_ambiguous_shapes=args.skip_ambiguous_shapes,
+            target_size=args.target_size,
         )
 
         # Filter to only process patients in this split

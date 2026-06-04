@@ -83,6 +83,7 @@ class Preprocessor:
         csv_output_path: str = "report.csv",
         global_stats_path: str = None,
         skip_ambiguous_shapes: bool = False,
+        target_size: int = None,
     ):
         """
         Args:
@@ -115,9 +116,11 @@ class Preprocessor:
         self.global_norm_mean = float(stats['mean'])
         self.global_norm_std = float(stats['std'])
         self.skip_ambiguous_shapes = skip_ambiguous_shapes
+        self.target_size = target_size
         logger.info(
             f"Global normalisation stats loaded from {global_stats_path}: "
             f"mean={self.global_norm_mean:.4f}, std={self.global_norm_std:.4f}"
+            + (f", target_size={target_size}" if target_size else "")
         )
 
         self.mha_input_dir = self.output_dir / "mha" / "input"
@@ -497,6 +500,14 @@ class Preprocessor:
                 peak_norm = np.rot90(peak_norm, k=1)
                 mask_2d   = np.rot90(mask_2d,   k=1)
 
+                # Resize to target size if specified
+                if self.target_size is not None:
+                    from PIL import Image as _PILImage
+                    sz = (self.target_size, self.target_size)
+                    pre_norm = np.array(_PILImage.fromarray(pre_norm).resize(sz, _PILImage.BICUBIC), dtype=np.float32)
+                    peak_norm = np.array(_PILImage.fromarray(peak_norm).resize(sz, _PILImage.BICUBIC), dtype=np.float32)
+                    mask_2d = np.array(_PILImage.fromarray(mask_2d.astype(np.float32)).resize(sz, _PILImage.NEAREST), dtype=np.int16)
+
                 self.save_mha(pre_norm,  self.mha_input_dir  / f"{fname}.mha")
                 self.save_mha(peak_norm, self.mha_gt_dir      / f"{fname}.mha")
                 self.save_mha(mask_2d,   self.mha_mask_dir    / f"{fname}.mha", is_label=True)
@@ -577,10 +588,15 @@ def main():
         "--skip_ambiguous_shapes", action="store_true", default=False,
         help=(
             "When set, patients whose segmentation volume has all three spatial dimensions "
+
             "different (non-square FOV) are logged as warnings and skipped instead of "
             "raising an error.  By default the pipeline raises AmbiguousFOVError for "
             "these cases so they are not silently ignored."
         )
+    )
+    parser.add_argument(
+        "--target_size", type=int, default=None,
+        help="Resize all output slices to target_size x target_size (e.g. 448). Default: no resize."
     )
     args = parser.parse_args()
 
@@ -607,6 +623,7 @@ def main():
         csv_output_path=str(csv_path),
         global_stats_path=args.global_stats_path,
         skip_ambiguous_shapes=args.skip_ambiguous_shapes,
+        target_size=args.target_size,
     )
 
     logger.info("Starting preprocessing pipeline...")

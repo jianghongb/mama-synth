@@ -72,20 +72,26 @@ def find_pre_contrast_file(patient_folder: Path):
     return candidates[0][1]
 
 
-def compute_stats(image_dir: Path):
+def compute_stats(image_dir: Path, exclude: set = None):
     """
     Welford online algorithm for global mean and variance.
     Iterates over pre-contrast volumes without loading all data at once.
     """
+    if exclude is None:
+        exclude = set()
     n_total = 0      # total voxel count
     mean = 0.0
     M2 = 0.0         # running sum of squared deviations
     n_patients = 0
+    n_excluded = 0
 
     patients = sorted(p for p in image_dir.iterdir() if p.is_dir())
     logger.info(f"Found {len(patients)} patient folders")
 
     for patient_folder in patients:
+        if patient_folder.name in exclude:
+            n_excluded += 1
+            continue
         pre_file = find_pre_contrast_file(patient_folder)
         if pre_file is None:
             logger.warning(f"No pre-contrast file found in {patient_folder.name}, skipping")
@@ -121,7 +127,7 @@ def compute_stats(image_dir: Path):
         raise RuntimeError("No voxels accumulated — check image_dir path and file format.")
 
     std = math.sqrt(M2 / n_total)
-    return {"mean": mean, "std": std, "n_voxels": n_total, "n_patients": n_patients}
+    return {"mean": mean, "std": std, "n_voxels": n_total, "n_patients": n_patients, "n_excluded": n_excluded}
 
 
 def main():
@@ -136,6 +142,10 @@ def main():
         "--output_path", required=True,
         help="Path to write the output JSON stats file."
     )
+    parser.add_argument(
+        "--exclude_list", default=None,
+        help="Path to a text file listing patient IDs to exclude (one per line, or parsed from motion_summary.txt format)."
+    )
     args = parser.parse_args()
 
     image_dir = Path(args.image_dir)
@@ -145,8 +155,22 @@ def main():
     output_path = Path(args.output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Load exclusion list
+    exclude = set()
+    if args.exclude_list:
+        import re
+        with open(args.exclude_list) as f:
+            text = f.read()
+        # Support motion_summary.txt format ("  CASE_ID: 123") or plain list
+        matches = re.findall(r'^\s+(\S+):\s+\d+', text, re.MULTILINE)
+        if matches:
+            exclude = set(matches)
+        else:
+            exclude = set(line.strip() for line in text.strip().splitlines() if line.strip())
+        logger.info(f"Excluding {len(exclude)} patients from stats computation")
+
     logger.info(f"Computing stats from pre-contrast volumes in: {image_dir}")
-    stats = compute_stats(image_dir)
+    stats = compute_stats(image_dir, exclude=exclude)
 
     with open(output_path, 'w') as f:
         json.dump(stats, f, indent=2)
