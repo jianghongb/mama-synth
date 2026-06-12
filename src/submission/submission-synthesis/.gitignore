@@ -1,0 +1,4 @@
+weights/*.pth
+test/output/
+*.tar.gz
+__pycache__/
