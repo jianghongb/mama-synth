@@ -198,83 +198,58 @@ class Preprocessor:
         self,
         shape: Tuple[int, ...],
         spacing: Optional[Tuple[float, ...]] = None,
+        axcodes: Optional[Tuple[str, ...]] = None,
     ) -> int:
-        """Determine the through-plane (slice) axis from volume shape.
+        """Determine the axial (S-I) slice axis from NIfTI orientation or volume shape.
 
-        Strategy (layered, in order of priority):
-
-        1. **Two axes share the same size, one is unique** → the unique axis is
-           the through-plane direction.  The result is cross-validated against
-           voxel spacing when available; a WARNING is logged if they disagree,
-           but the shape-based result is used as the primary criterion.
-
-        2. **All three axes equal (cubic volume)** → cannot distinguish axes from
-           shape alone.  A WARNING is logged and axis 2 is returned as the axial
-           convention fallback.
-
-        3. **All three axes differ (non-square FOV)** → raises AmbiguousFOVError.
-           Set ``skip_ambiguous_shapes=True`` on the Preprocessor to automatically
-           discard these patients during pipeline execution.
-
-        Args:
-            shape: 3-D volume shape, e.g. ``(H, W, D)``.
-            spacing: Voxel spacing in mm, e.g. ``(sx, sy, sz)``.  Used only for
-                     cross-validation in case 1; may be ``None``.
-
-        Returns:
-            Index (0, 1, or 2) of the through-plane axis.
-
-        Raises:
-            ValueError: If ``shape`` is not 3-D.
-            AmbiguousFOVError: If all three dimensions are different (case 3).
+        Priority:
+        1. If axcodes are provided, find the axis with 'S' or 'I' (axial direction).
+        2. Otherwise fall back to shape-based heuristic.
         """
         if len(shape) != 3:
             raise ValueError(f"Expected a 3-D volume shape, got {shape}")
 
-        # Group axis indices by their size
+        # Priority 1: use NIfTI orientation to find axial (S-I) axis
+        if axcodes is not None:
+            for i, code in enumerate(axcodes):
+                if code in ('S', 'I'):
+                    return i
+            logger.warning(
+                "No S/I axis found in orientation %s. Falling back to shape heuristic.",
+                axcodes,
+            )
+
+        # Priority 2: shape-based heuristic (original logic)
         size_to_axes: Dict[int, list] = {}
         for ax, s in enumerate(shape):
             size_to_axes.setdefault(s, []).append(ax)
 
         n_unique_sizes = len(size_to_axes)
 
-        # --- Case 2: cubic ---
         if n_unique_sizes == 1:
             logger.warning(
-                "Cubic volume detected (shape %s). Cannot determine through-plane "
-                "axis from shape alone. Falling back to axis 2 (axial convention).",
-                shape,
+                "Cubic volume detected (shape %s). Falling back to axis 2.", shape,
             )
             return 2
 
-        # --- Case 3: all three dimensions differ ---
         if n_unique_sizes == 3:
             raise AmbiguousFOVError(
                 f"All three dimensions differ (shape {shape}). Cannot reliably "
                 "determine the through-plane axis from shape alone. Pass "
-                "skip_ambiguous_shapes=True to the Preprocessor (or "
-                "--skip_ambiguous_shapes on the CLI) to discard these cases "
-                "automatically."
+                "skip_ambiguous_shapes=True to discard these cases."
             )
 
-        # --- Case 1: exactly two distinct sizes → one unique axis ---
         shape_axis: int = next(
-            axes[0]
-            for axes in size_to_axes.values()
-            if len(axes) == 1
+            axes[0] for axes in size_to_axes.values() if len(axes) == 1
         )
 
-        # Cross-validate against voxel spacing when available
         if spacing is not None and len(spacing) >= 3:
             spacing_axis = int(np.argmax(spacing[:3]))
             if spacing_axis != shape_axis:
                 logger.warning(
-                    "Shape-based through-plane axis (%d, size %d) disagrees with "
-                    "spacing-based axis (%d, spacing %.4f mm) for volume shape %s. "
-                    "Using shape-based axis as primary criterion.",
-                    shape_axis, shape[shape_axis],
-                    spacing_axis, spacing[spacing_axis],
-                    shape,
+                    "Shape-based axis (%d) disagrees with spacing-based axis (%d) "
+                    "for shape %s. Using shape-based.",
+                    shape_axis, spacing_axis, shape,
                 )
 
         return shape_axis
@@ -283,21 +258,13 @@ class Preprocessor:
         self,
         segmentation: np.ndarray,
         spacing: Optional[Tuple[float, ...]] = None,
+        axcodes: Optional[Tuple[str, ...]] = None,
     ) -> Tuple[int, int]:
         """Return ``(slice_idx, axis)`` for the slice with the most label voxels.
 
-        The through-plane axis is resolved via :meth:`determine_slice_axis`.
-
-        Args:
-            segmentation: 3-D binary/label volume.
-            spacing: Voxel spacing in mm forwarded to :meth:`determine_slice_axis`
-                     for cross-validation.  May be ``None``.
-
-        Returns:
-            A tuple ``(slice_idx, axis)`` where *slice_idx* is the 0-based index
-            of the selected slice and *axis* is the through-plane axis (0, 1, or 2).
+        The axial (S-I) axis is resolved via :meth:`determine_slice_axis`.
         """
-        axis = self.determine_slice_axis(segmentation.shape, spacing)
+        axis = self.determine_slice_axis(segmentation.shape, spacing, axcodes)
         others = tuple(i for i in range(segmentation.ndim) if i != axis)
         slice_areas = np.sum(segmentation > 0, axis=others)
         return int(np.argmax(slice_areas)), axis
@@ -463,9 +430,14 @@ class Preprocessor:
 
                 # Step 2 – select slice with largest tumour area, then extract 2D slices
                 spacing = self._load_spacing(seg_file)
+                # Load orientation to ensure axial (S-I) axis is used
+                axcodes = None
+                seg_path_str = str(seg_file)
+                if seg_path_str.endswith(('.nii.gz', '.nii')):
+                    axcodes = nib.aff2axcodes(nib.load(seg_path_str).affine)
                 try:
                     largest_slice, slice_axis = self.find_largest_label_slice(
-                        segmentation, spacing
+                        segmentation, spacing, axcodes
                     )
                 except AmbiguousFOVError as exc:
                     if self.skip_ambiguous_shapes:
