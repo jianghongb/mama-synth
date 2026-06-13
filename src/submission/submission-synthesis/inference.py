@@ -72,11 +72,33 @@ def main():
 
     # 2D slice input from GC
     sl = arr.squeeze()
-    padded, (oh, ow) = pad_to_multiple(sl)
+    orig_h, orig_w = sl.shape
+
+    # Resize to 512x512 (model trained at this resolution)
+    MODEL_SIZE = 512
+    if orig_h != MODEL_SIZE or orig_w != MODEL_SIZE:
+        t_input = torch.from_numpy(sl).unsqueeze(0).unsqueeze(0)  # [1,1,H,W]
+        t_input = torch.nn.functional.interpolate(t_input, size=(MODEL_SIZE, MODEL_SIZE), mode='bilinear', align_corners=False)
+        sl_resized = t_input[0, 0].numpy()
+    else:
+        sl_resized = sl
+
+    # Pad to multiple of 16 (should be no-op for 512)
+    padded, (ph, pw) = pad_to_multiple(sl_resized)
+
+    # Inference
     t = torch.from_numpy(padded).unsqueeze(0).unsqueeze(0).to(device)
     with torch.no_grad():
         out = netG(t)
-    result = out[0, 0, :oh, :ow].cpu().numpy().astype(np.float32)
+    result_512 = out[0, 0, :ph, :pw].cpu()
+
+    # Resize back to original resolution
+    if orig_h != MODEL_SIZE or orig_w != MODEL_SIZE:
+        result = torch.nn.functional.interpolate(
+            result_512.unsqueeze(0).unsqueeze(0), size=(orig_h, orig_w), mode='bilinear', align_corners=False
+        )[0, 0].numpy().astype(np.float32)
+    else:
+        result = result_512.numpy().astype(np.float32)
 
     # Restore original ndim
     if arr.ndim == 3:
