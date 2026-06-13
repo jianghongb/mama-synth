@@ -429,37 +429,15 @@ class Vgg19(torch.nn.Module):
 ########## MSSC Loss (Multi-Scale Subtraction Consistency) ##########
 
 class MSScLoss(nn.Module):
-    """Multi-Scale Subtraction Consistency loss via Laplacian pyramid.
+    """Multi-Scale Enhancement Consistency (MSEC) loss.
     
-    Computes L1 on the subtraction map (fake - input) vs (real - input)
-    at multiple scales using a Laplacian pyramid decomposition.
-    Optionally includes Sobel gradient consistency.
+    Computes L1 on the subtraction map (fake - pre) vs (real - pre)
+    at multiple downsampled scales (1, 1/2, 1/4).
+    Matches the MSEC formulation in Yang et al. MICCAI 2026.
     """
-    def __init__(self, levels=3, lambda_grad=0.0):
+    def __init__(self, levels=3):
         super().__init__()
         self.levels = levels
-        self.lambda_grad = lambda_grad
-
-    @staticmethod
-    def _sobel(x):
-        kx = x.new_tensor([[1,0,-1],[2,0,-2],[1,0,-1]]).view(1,1,3,3)
-        ky = x.new_tensor([[1,2,1],[0,0,0],[-1,-2,-1]]).view(1,1,3,3)
-        kx = kx.repeat(x.size(1), 1, 1, 1)
-        ky = ky.repeat(x.size(1), 1, 1, 1)
-        gx = nn.functional.conv2d(x, kx, padding=1, groups=x.size(1))
-        gy = nn.functional.conv2d(x, ky, padding=1, groups=x.size(1))
-        return torch.sqrt(gx*gx + gy*gy + 1e-6)
-
-    def _laplacian_pyramid(self, x):
-        pyr = []
-        cur = x
-        for _ in range(self.levels - 1):
-            down = nn.functional.avg_pool2d(cur, 2)
-            up = nn.functional.interpolate(down, size=cur.shape[-2:], mode='bilinear', align_corners=False)
-            pyr.append(cur - up)
-            cur = down
-        pyr.append(cur)
-        return pyr
 
     def forward(self, fake, real, pre):
         """
@@ -470,12 +448,11 @@ class MSScLoss(nn.Module):
         """
         sub_fake = fake - pre
         sub_real = real - pre
-        pyr_fake = self._laplacian_pyramid(sub_fake)
-        pyr_real = self._laplacian_pyramid(sub_real)
-        loss = sum((pf - pr).abs().mean() for pf, pr in zip(pyr_fake, pyr_real))
-        loss = loss / self.levels
+        loss = 0
+        for i in range(self.levels):
+            if i > 0:
+                sub_fake = nn.functional.avg_pool2d(sub_fake, 2)
+                sub_real = nn.functional.avg_pool2d(sub_real, 2)
+            loss = loss + (sub_fake - sub_real).abs().mean()
+        return loss / self.levels
 
-        if self.lambda_grad > 0:
-            loss = loss + self.lambda_grad * (self._sobel(sub_fake) - self._sobel(sub_real)).abs().mean()
-
-        return loss
