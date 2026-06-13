@@ -9,11 +9,11 @@ WORKDIR /opt/app
 RUN pip install --no-cache-dir SimpleITK==2.3.1
 
 COPY --chown=user:user models/networks.py ./models/networks.py
-COPY --chown=user:user process.py ./
+COPY --chown=user:user inference.py ./
 COPY --chown=user:user weights/latest_net_G.pth ./weights/latest_net_G.pth
 
 RUN mkdir -p /output && chown user:user /output
 
 USER user
 
-ENTRYPOINT ["python", "process.py"]
+ENTRYPOINT ["python", "inference.py"]
