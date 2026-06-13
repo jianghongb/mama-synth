@@ -83,22 +83,30 @@ def main():
     else:
         sl_resized = sl
 
+    # Breast masking: zero out chest wall
+    BREAST_THRESH = -0.3
+    breast_mask = (sl_resized > BREAST_THRESH).astype(np.float32)
+    sl_masked = sl_resized * breast_mask
+
     # Pad to multiple of 16 (should be no-op for 512)
-    padded, (ph, pw) = pad_to_multiple(sl_resized)
+    padded, (ph, pw) = pad_to_multiple(sl_masked)
 
     # Inference
     t = torch.from_numpy(padded).unsqueeze(0).unsqueeze(0).to(device)
     with torch.no_grad():
         out = netG(t)
-    result_512 = out[0, 0, :ph, :pw].cpu()
+    result_512 = out[0, 0, :ph, :pw].cpu().numpy()
+
+    # Fill chest wall with pre-contrast values
+    result_512 = result_512 * breast_mask + sl_resized * (1 - breast_mask)
 
     # Resize back to original resolution
     if orig_h != MODEL_SIZE or orig_w != MODEL_SIZE:
         result = torch.nn.functional.interpolate(
-            result_512.unsqueeze(0).unsqueeze(0), size=(orig_h, orig_w), mode='bilinear', align_corners=False
+            torch.from_numpy(result_512).unsqueeze(0).unsqueeze(0), size=(orig_h, orig_w), mode='bilinear', align_corners=False
         )[0, 0].numpy().astype(np.float32)
     else:
-        result = result_512.numpy().astype(np.float32)
+        result = result_512.astype(np.float32)
 
     # Restore original ndim
     if arr.ndim == 3:

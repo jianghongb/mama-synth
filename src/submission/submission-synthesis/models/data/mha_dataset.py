@@ -106,6 +106,13 @@ class MhaDataset(BaseDataset):
             gt_t = gt_t.flip(-1)
             mask_t = mask_t.flip(-1)
 
+        # Breast masking: zero out chest wall
+        if getattr(self.opt, 'breast_mask', False):
+            thresh = getattr(self.opt, 'breast_mask_thresh', -0.3)
+            breast_m = (input_t > thresh).float()
+            input_t = input_t * breast_m
+            gt_t = gt_t * breast_m
+
         return {
             'label': input_t,       # pre-contrast (model input)
             'inst': torch.zeros(1),  # placeholder for compatibility

@@ -72,6 +72,8 @@ class BaseOptions():
         self.parser.add_argument('--stats_file', type=str, default=None, help='path to training_pre_stats.json for z-score→raw conversion')
         self.parser.add_argument('--mssc_levels', type=int, default=3, help='number of Laplacian pyramid levels for MSSC')
         self.parser.add_argument('--square_only', action='store_true', help='only use square (axial) images for training')
+        self.parser.add_argument('--breast_mask', action='store_true', help='mask out chest wall during training/inference')
+        self.parser.add_argument('--breast_mask_thresh', type=float, default=-0.3, help='z-score threshold for breast tissue')
 
         self.initialized = True
 
