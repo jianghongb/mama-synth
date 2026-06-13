@@ -11,7 +11,7 @@
 #
 # v3: v1 baseline + MSSC only
 # Everything same as v1 (mamasynth_residual) except:
-#   --lambda_mssc 10 (new)
+#   --lambda_mssc 50 (new)
 
 PROJ=/proj/berzbiomedicalimagingkth/users/x_honji
 
@@ -29,7 +29,7 @@ pip show torchmetrics > /dev/null 2>&1 || pip install torchmetrics
 cd $PROJ/SimulatingDCE/synthesis/pix2pixHD
 
 python train.py \
-  --name mamasynth_v3_mssc \
+  --name mamasynth_v5_msec50 \
   --model pix2pixHD \
   --dataset_mode mha \
   --dataroot $PROJ/data_split/train \
@@ -53,7 +53,7 @@ python train.py \
   --lambda_feat 10 \
   --lambda_gan 1.0 \
   --tumor_weight 10 \
-  --lambda_mssc 10 \
+  --lambda_mssc 50 \
   --mssc_levels 3 \
   --lambda_ssim 0 \
   --lambda_vgg 10 \
