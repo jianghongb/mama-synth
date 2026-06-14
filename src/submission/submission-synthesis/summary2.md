@@ -106,6 +106,7 @@ L_msec = Σ_{r=1,1/2,1/4} ||down_r(fake-pre) - down_r(gt-pre)||_1
 | v3 | v1 + MSSC=10 | 1.32 | ✅ 已提交 GC (排27) |
 | v4 | v3 + square_only + tumor=40 | 1.61 | ❌ 弃用 |
 | **v5** | MSEC=50 (论文方法) + resize | **0.25** | ✅ 待提交 GC |
+| **v6** | v5 + data_split_v2 (1356 cases, 含 motion) | — | ⏳ 训练中 |
 
 ## 代码仓库
 
