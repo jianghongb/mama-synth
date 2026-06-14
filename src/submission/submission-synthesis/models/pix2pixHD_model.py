@@ -85,7 +85,7 @@ class Pix2PixHDModel(BaseModel):
             if not opt.no_vgg_loss:             
                 self.criterionVGG = networks.VGGLoss(self.gpu_ids)
             if self.use_mssc_loss:
-                self.criterionMSSC = networks.MSScLoss(levels=getattr(opt, 'mssc_levels', 3), lambda_grad=getattr(opt, 'lambda_mssc_grad', 0.0))
+                self.criterionMSSC = networks.MSScLoss(levels=getattr(opt, 'mssc_levels', 3))
                 
         
             # Names so we can breakout loss
