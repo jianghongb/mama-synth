@@ -163,7 +163,7 @@ class Pix2PixHDModel(BaseModel):
         else:
             return self.netD.forward(input_concat)
 
-    def forward(self, label, inst, image, feat, infer=False, mask=None):
+    def forward(self, label, inst, image, feat, infer=False, mask=None, breast_mask=None):
         # Encode Inputs
         input_label, inst_map, real_image, feat_map = self.encode_input(label, inst, image, feat)  
 
@@ -176,16 +176,25 @@ class Pix2PixHDModel(BaseModel):
             input_concat = input_label
         fake_image = self.netG.forward(input_concat)
 
+        # Apply breast mask to fake/real for loss computation (chest wall ignored)
+        if breast_mask is not None:
+            bm = breast_mask.cuda() if torch.cuda.is_available() else breast_mask
+            fake_masked = fake_image * bm
+            real_masked = real_image * bm
+        else:
+            fake_masked = fake_image
+            real_masked = real_image
+
         # Fake Detection and Loss
-        pred_fake_pool = self.discriminate(input_label, fake_image, use_pool=True)
+        pred_fake_pool = self.discriminate(input_label, fake_masked, use_pool=True)
         loss_D_fake = self.criterionGAN(pred_fake_pool, False)        
 
         # Real Detection and Loss        
-        pred_real = self.discriminate(input_label, real_image)
+        pred_real = self.discriminate(input_label, real_masked)
         loss_D_real = self.criterionGAN(pred_real, True)
 
         # GAN loss (Fake Passability Loss)        
-        pred_fake = self.netD.forward(torch.cat((input_label, fake_image), dim=1))        
+        pred_fake = self.netD.forward(torch.cat((input_label, fake_masked), dim=1))        
         loss_G_GAN = self.criterionGAN(pred_fake, True) * self.lambda_gan
         
         # GAN feature matching loss
@@ -201,7 +210,7 @@ class Pix2PixHDModel(BaseModel):
         # VGG feature matching loss
         loss_G_VGG = 0
         if not self.opt.no_vgg_loss:
-            loss_G_VGG = self.criterionVGG(fake_image, real_image) * self.lambda_vgg
+            loss_G_VGG = self.criterionVGG(fake_masked, real_masked) * self.lambda_vgg
 
         # SSIM loss
         loss_G_SSIM = 0

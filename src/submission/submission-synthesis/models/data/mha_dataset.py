@@ -33,6 +33,7 @@ class MhaDataset(BaseDataset):
         self.dir_input = os.path.join(opt.dataroot, 'mha', 'input')
         self.dir_gt = os.path.join(opt.dataroot, 'mha', 'ground_truth')
         self.dir_mask = os.path.join(opt.dataroot, 'mha', 'mask')
+        self.dir_breast_mask = getattr(opt, 'breast_mask_dir', '') or ''
 
         all_files = sorted([
             f for f in os.listdir(self.dir_input) if f.endswith('.mha')
@@ -106,19 +107,38 @@ class MhaDataset(BaseDataset):
             gt_t = gt_t.flip(-1)
             mask_t = mask_t.flip(-1)
 
-        # Breast masking: zero out chest wall
-        if getattr(self.opt, 'breast_mask', False):
+        # Load breast mask (precomputed or threshold)
+        breast_mask_t = None
+        if self.dir_breast_mask and os.path.exists(os.path.join(self.dir_breast_mask, fname)):
+            bm_arr = sitk.GetArrayFromImage(
+                sitk.ReadImage(os.path.join(self.dir_breast_mask, fname))
+            ).astype(np.float32)
+            bm_arr = (bm_arr > 0).astype(np.float32)
+            breast_mask_t = torch.from_numpy(bm_arr).unsqueeze(0)
+            if self.fixed_size:
+                s = self.target_size
+                breast_mask_t = F.interpolate(breast_mask_t.unsqueeze(0), size=(s, s), mode='nearest').squeeze(0)
+            else:
+                breast_mask_t = self._pad_tensor(breast_mask_t)
+        elif getattr(self.opt, 'breast_mask', False):
             thresh = getattr(self.opt, 'breast_mask_thresh', -0.3)
-            breast_m = (input_t > thresh).float()
-            input_t = input_t * breast_m
-            gt_t = gt_t * breast_m
+            breast_mask_t = (input_t > thresh).float()
+
+        # Random horizontal flip during training
+        if self.opt.isTrain and not self.opt.no_flip and torch.rand(1).item() > 0.5:
+            input_t = input_t.flip(-1)
+            gt_t = gt_t.flip(-1)
+            mask_t = mask_t.flip(-1)
+            if breast_mask_t is not None:
+                breast_mask_t = breast_mask_t.flip(-1)
 
         return {
-            'label': input_t,       # pre-contrast (model input)
-            'inst': torch.zeros(1),  # placeholder for compatibility
-            'image': gt_t,           # ground truth subtraction
-            'feat': torch.zeros(1),  # placeholder
+            'label': input_t,
+            'inst': torch.zeros(1),
+            'image': gt_t,
+            'feat': torch.zeros(1),
             'mask': mask_t,
+            'breast_mask': breast_mask_t if breast_mask_t is not None else torch.ones_like(input_t),
             'path': os.path.join(self.dir_input, fname),
             'orig_size': (orig_h, orig_w),
         }

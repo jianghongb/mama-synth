@@ -84,8 +84,9 @@ for epoch in range(start_epoch, opt.niter + opt.niter_decay + 1):
 
         ############## Forward Pass ######################
         mask = Variable(data['mask']) if 'mask' in data else None
+        breast_mask = Variable(data['breast_mask']) if 'breast_mask' in data else None
         losses, generated = model(Variable(data['label']), Variable(data['inst']), 
-            Variable(data['image']), Variable(data['feat']), infer=save_fake, mask=mask)
+            Variable(data['image']), Variable(data['feat']), infer=save_fake, mask=mask, breast_mask=breast_mask)
 
         # sum per device losses
         losses = [ torch.mean(x) if not isinstance(x, int) else x for x in losses ]
