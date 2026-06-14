@@ -1,5 +1,8 @@
 import time
 import os
+import sys
+# Allow running from the models/ directory itself
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
 import torch
 from torch.autograd import Variable

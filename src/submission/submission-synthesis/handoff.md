@@ -415,3 +415,117 @@ Pre-contrast → Encoder → 特征图
 **和 residual mode 的关系**：本质类似——胸壁的 delta≈0，只是这里用 mask 显式排除而非让模型隐式学出。
 
 **优先级**：可作为 v8 实验，在 attention branch (v7) 之后尝试。
+
+---
+
+## 8. Breast Masking Pipeline (v7)
+
+### 概述
+
+在推理时，用 nnUNet 预训练的 breast segmentation 模型将图像分为"乳房区域"和"胸壁区域"：
+- **乳房区域**: 使用 Pix2PixHD 合成的 post-contrast 结果
+- **胸壁区域**: 直接保留 pre-contrast 原值（胸壁不吸收造影剂，pre ≈ post）
+
+### 模型来源
+
+- **权重**: `nnUNet_pretrained_weights/Dataset910_BreastSegNet/`
+- **来源**: MAIA server `~/renda/weights/Dataset910_BreastSegNet`
+- **两个变体**:
+  - `nnUNetTrainer__nnUNetPlans__2d` — PlainConvUNet (~268MB)
+  - `nnUNetTrainer__nnUNetResEncUNetLPlans__2d` — ResEncUNetL (~848MB, 效果更好)
+- **训练数据**: 973 个 2D slices ("QihangBreast" dataset)
+- **配置**: 2D, fold_0, ZScoreNormalization
+
+### 分割标签
+
+| Label | 类别 | 归属 |
+|-------|------|------|
+| 0 | background | 排除 |
+| 1 | tissue | **乳房** ✓ |
+| 2 | vessel | **乳房** ✓ |
+| 3 | muscle | 排除（胸壁） |
+| 4 | bone | 排除 |
+| 5 | lesion | **乳房** ✓ |
+| 6 | lymphnode | **乳房** ✓ |
+| 7 | heart | 排除 |
+| 8 | liver | 排除 |
+| 9 | implant | **乳房** ✓ |
+
+Breast mask = label ∈ {1, 2, 5, 6, 9}
+
+### 推理 Pipeline
+
+```
+pre-contrast input
+  │
+  ├─→ nnUNet BreastSeg → breast_mask (binary)
+  │
+  ├─→ Resize 512 → Pix2PixHD → Resize back → synthetic_post
+  │
+  └─→ output = where(breast_mask, synthetic_post, pre_contrast)
+```
+
+### 推理代码
+
+`inference.py` 中使用 `predict_single_npy_array` 避免 multiprocessing 问题：
+
+```python
+predictor.predict_single_npy_array(
+    arr,       # shape (1, 1, H, W) for 2D
+    props,     # spacing/origin metadata
+    None, None, False
+)
+```
+
+### Docker 容器大小
+
+| 组件 | 大小 |
+|------|------|
+| PyTorch base | ~4.5 GB |
+| nnunetv2 + deps | ~200 MB |
+| Pix2PixHD weights | 730 MB |
+| BreastSeg weights (ResEncUNetL) | 848 MB |
+| **总计** | **~6.3 GB** ✅ (< 10GB) |
+
+### 预期收益
+
+- MSE ↓: 胸壁不再产生错误增强
+- LPIPS ↓: 减少胸壁伪影
+- Dice ↑: 减少假阳性增强区域
+
+### 文件变更
+
+- `inference.py` — 集成 breast seg + synthesis 合并逻辑
+- `Dockerfile` — 添加 nnunetv2 依赖 + breast_seg 权重
+- `weights/breast_seg/` — BreastSegNet 模型文件
+
+---
+
+## 9. 训练版本 v7
+
+### v7 vs v6 区别
+
+v7 在**训练时**也使用 breast mask，让模型只学习乳房区域的增强，不浪费容量在胸壁上。
+
+| 对比 | v6 | v7 |
+|------|----|----|
+| 数据 | data_split_v2 (1356) | data_split_v2 (1356) |
+| 训练时 masking | 无 | breast_mask × loss |
+| 推理时 masking | 无 | nnUNet breast mask |
+| Loss 改动 | 无 | 所有 loss 只在 breast 区域计算 |
+
+### 训练时 breast mask 的用法
+
+```python
+# 在训练 forward 中:
+fake = Generator(pre_masked)  # 输入: pre × breast_mask
+loss_G = loss_fn(fake × breast_mask, real × breast_mask)
+
+# 或者更简单: 只改 loss, 不改输入
+fake = Generator(pre)
+loss_G = loss_fn(fake × breast_mask, real × breast_mask)  # loss 只看乳房区域
+```
+
+### 训练脚本
+
+`berzelius_train_v7.sh` — 基于 v6，添加 `--breast_mask_dir` 参数。
