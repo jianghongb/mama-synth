@@ -21,7 +21,7 @@ def lcm(a,b): return abs(a * b)/gcd(a,b) if a and b else 0
 
 from options.train_options import TrainOptions
 from data.data_loader import CreateDataLoader
-from models.models import create_model
+from models import create_model
 import util.util as util
 from util.visualizer import Visualizer
 
