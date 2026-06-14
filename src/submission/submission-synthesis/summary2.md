@@ -77,10 +77,20 @@ L_msec = Σ_{r=1,1/2,1/4} ||down_r(fake-pre) - down_r(gt-pre)||_1
 | Dice ↑ | 0.251 | 0.271 | **0.646** | 0.487 |
 | HD95 ↓ | 173.5 | 186.6 | **103.8** | 107.4 |
 
-### GC Validation 实际排名 (v3, 70 cases)
-- Mean Position: 24.9 (排名 27th)
+### GC Validation 实际排名 (70 cases)
+
+**v3 + resize (排名 27th, 2026-06-14)**
+- Mean Position: 24.3
+- MSE=1.28, LPIPS=0.26, SSIM_tumor=0.22, FRD=31.71
+- AUROC_contrast=0.82, AUROC_tumor=0.54, Dice=0.34, HD95=222
+- 推理已包含 resize to 512
 - 主要瓶颈: LPIPS=0.26 (pos 36), FRD=31.71 (pos 38)
-- 原因: 推理时没 resize + RV_07 未知数据 domain gap
+- 原因: RV_07 未知数据 domain gap + 模型 MSEC 权重不够 (λ=10)
+
+**v3 无 resize (排名 30th, 2026-06-13)**
+- Mean Position: 25.4
+- MSE=1.22, LPIPS=0.26, SSIM_tumor=0.23, FRD=31.88
+- Dice=0.31, HD95=257
 
 ### 关键改进历程
 1. **v1→v3**: 加 MSSC loss (Laplacian pyramid, λ=10) — 小幅改善
