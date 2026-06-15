@@ -597,3 +597,36 @@ v7 是**外部泛化能力最强**的版本。推荐提交 GC validation（GC te
 - 再训练 200 epochs with `--breast_mask_dir`
 
 **状态**: ⏳ 训练中
+
+---
+
+## 10. 训练版本 v8 (Intensity Augmentation)
+
+### 目标
+提高模型在 GC 未知数据 (RV_07) 上的泛化能力。
+
+### 问题分析
+- v5 本地全面超越 #1，但 GC 上排 27
+- RV_07 cases: LPIPS 和 #1 一样 (0.14)，但 Dice=0、MSE 高
+- 说明图像结构对，但强度/对比度 scale 不匹配
+- 根因：模型只见过训练集的特定强度分布
+
+### 方案：训练时随机强度增强
+```python
+# 每个 sample 随机：
+scale = uniform(0.7, 1.3)   # 模拟不同扫描仪信号强度
+bias = uniform(-0.2, 0.2)   # 模拟不同归一化基线
+input = input * scale + bias
+gt = gt * scale + bias       # 同步变换，保持 enhancement pattern
+```
+
+### v8 配置
+- 基于 v5 (MSEC=50, 1074 cases, resize 512)
+- 唯一新增: `--intensity_aug`
+- 训练脚本: `berzelius_train_v8.sh`
+- 推理不变（纯 resize，无后处理）
+
+### 为什么不用自适应推理缩放
+- 已测试 adaptive delta scaling → 本地变差 (MSE 0.28→0.59)
+- 原因：in-distribution 数据不需要缩放，强制缩放反而破坏
+- 正确做法是从训练端解决，让模型本身对强度鲁棒
