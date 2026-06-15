@@ -10,8 +10,8 @@
 #SBATCH --mail-user=hongjia@kth.se
 #
 # v10: v5 hyperparams + data_split_v4 (2811 cases, multi-domain, no breast motion)
-#      + breast mask (loss only in breast region)
-# Combines: best hyperparams (v5) + most data (v4) + breast mask strategy (v7/v9)
+#      + breast mask (loss only in breast region) + intensity augmentation (from v8)
+# Combines: best hyperparams (v5) + most data (v4) + breast mask (v7/v9) + intensity_aug (v8)
 
 PROJ=/proj/berzbiomedicalimagingkth/users/x_honji
 
@@ -50,6 +50,7 @@ python train.py \
   --output_nc 1 \
   --no_instance \
   --residual_mode \
+  --intensity_aug \
   --resize_or_crop resize \
   --loadSize 512 \
   --fineSize 512 \
