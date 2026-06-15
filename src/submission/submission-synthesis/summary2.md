@@ -137,6 +137,16 @@ L_msec = Σ_{r=1,1/2,1/4} ||down_r(fake-pre) - down_r(gt-pre)||_1
 - 与 v5 对比，确认没有退步
 - 如果提升则提交 GC
 
+### 加入 AMBL 外部数据 (Advanced-MRI-Breast-Lesions)
+
+**来源**: TCIA, 99 patients with SEG, 1.5T GE, 以色列
+
+**处理状态**:
+- DICOM → NIfTI (multi-phase split): ✅ 485 cases
+- NIfTI → MHA (preprocess.py): ⏳ 待执行
+
+**预期效果**: 5 个 post-contrast phases 提供真实的增强幅度多样性，替代人工 intensity augmentation，改善 OOD 泛化
+
 ### v7: Breast Masking (训练时 loss 只在乳房区域计算)
 
 **改动**：v6 基础上，用 nnUNet (Dataset910_BreastSegNet) 生成 breast mask，训练时 loss 只在 breast region 内计算，忽略胸壁区域。

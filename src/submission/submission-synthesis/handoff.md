@@ -630,3 +630,43 @@ gt = gt * scale + bias       # 同步变换，保持 enhancement pattern
 - 已测试 adaptive delta scaling → 本地变差 (MSE 0.28→0.59)
 - 原因：in-distribution 数据不需要缩放，强制缩放反而破坏
 - 正确做法是从训练端解决，让模型本身对强度鲁棒
+
+---
+
+## 11. AMBL 数据处理 (Advanced-MRI-Breast-Lesions)
+
+### 数据来源
+- TCIA: https://www.cancerimagingarchive.net/collection/advanced-mri-breast-lesions/
+- 632 patients total, 99 with segmentation (ROI)
+- 以色列单中心, 1.5T GE, 2018-2021
+- License: CC BY 4.0
+
+### 数据结构
+每个患者有：
+- `AX Sen Vibrant MASK` — pre-contrast (116 slices, 512×512)
+- `AX Sen Vibrant MultiPhase` — 5 post-contrast phases (580=116×5 slices)
+- `ROI` — 单 slice 肿瘤标注
+- `+C` — 单个 post-contrast phase
+
+### 处理流程
+```
+DICOM (964 folders, 99 patients)
+  → convert_ambl_dicom.py (multi-phase split)
+    → NIfTI (485 cases = 92 patients × ~5 phases)
+      → preprocess.py (z-score normalization, slice extraction)
+        → MHA (input/ground_truth/mask)
+```
+
+### 关键脚本
+- `models/convert_ambl_dicom.py` — DICOM→NIfTI，按 phase 拆分为独立 case
+
+### 多 Phase 拆分的好处
+1. 数据量 5× 放大 (92→485 cases)
+2. 模型学会不同增强阶段（弱→强→衰减），提升泛化能力
+3. 对未知数据（RV_07）不同增强幅度更鲁棒
+4. 用真实物理变化代替人工 intensity augmentation
+
+### 处理结果
+- 成功转换: 485 cases (images + segmentations)
+- 路径: `/Users/ehogjig/git/kth/ambl_nifti/`
+- 待 preprocess.py 处理后可合并到训练集
