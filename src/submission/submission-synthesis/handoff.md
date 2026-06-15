@@ -670,3 +670,71 @@ DICOM (964 folders, 99 patients)
 - 成功转换: 485 cases (images + segmentations)
 - 路径: `/Users/ehogjig/git/kth/ambl_nifti/`
 - 待 preprocess.py 处理后可合并到训练集
+
+---
+
+## 12. 评估指标详解 (MAMA-SYNTH Evaluation)
+
+### 排名机制
+- 4 组指标，每组内部先排名，然后 4 组取平均 = Final Rank
+- Mean Position 越小越好
+
+### 指标分组
+
+#### 组 1: Image-to-Image Fidelity (全图像素级)
+
+| 指标 | 含义 | 方向 | 计算方式 |
+|------|------|------|---------|
+| **MSE** | 均方误差 | ↓ 越小越好 | 直接在 z-score 归一化图像上计算 `mean((pred-gt)^2)` |
+| **LPIPS** | 感知图像相似度 | ↓ 越小越好 | 用 AlexNet 提取深度特征，比较特征空间距离。输入 clip 到 ±5σ 并映射到 [-1,1] |
+
+**MSE 高的原因**: 强度 scale 不匹配、增强幅度不对、背景区域有偏移
+**LPIPS 高的原因**: 纹理模糊、细节丢失、GAN 输出过于平滑
+
+#### 组 2: ROI-to-ROI Tumor Realism (肿瘤区域)
+
+| 指标 | 含义 | 方向 | 计算方式 |
+|------|------|------|---------|
+| **SSIM_tumor** | 肿瘤区域结构相似度 | ↑ 越大越好 | 在 tumor mask 内计算局部窗口 SSIM (data_range=10.0)，取 mask 内均值 |
+| **FRD** | Fréchet Radiomics Distance | ↓ 越小越好 | 提取 tumor patch 的 pyradiomics 特征，计算 pred 和 gt 特征分布的 Fréchet 距离 |
+
+**SSIM_tumor 低的原因**: 肿瘤区域增强不够/过度、局部结构失真
+**FRD 高的原因**: radiomic 纹理特征分布偏移（与训练数据分布差异大时恶化）
+
+#### 组 3: Downstream Classification (分类实用性)
+
+| 指标 | 含义 | 方向 | 计算方式 |
+|------|------|------|---------|
+| **AUROC Contrast** | Pre vs Post 对比度分类 | ↑ 越大越好 | 预训练分类器判断合成图是否像 post-contrast。1.0=完美，0.5=随机 |
+| **AUROC Tumor-ROI** | 肿瘤 vs 非肿瘤区域分类 | ↑ 越大越好 | 用镜像方法生成对称 mask，分类器判断合成图是否保留了肿瘤信号 |
+
+**AUROC Contrast 低的原因**: 合成图增强信号太弱，看不出是 post-contrast
+**AUROC Tumor-ROI 低的原因**: 肿瘤区域没有足够区分度
+
+#### 组 4: Downstream Segmentation (分割实用性)
+
+| 指标 | 含义 | 方向 | 计算方式 |
+|------|------|------|---------|
+| **Dice** | 分割重叠度 | ↑ 越大越好 | 用预训练 nnU-Net 在合成图上分割肿瘤，与 GT mask 比较 overlap |
+| **HD95** | 95% Hausdorff 距离 | ↓ 越小越好 | 分割边界之间的第 95 百分位距离（像素），越小 = 边界越准 |
+
+**Dice 低的原因**: 合成图增强不够让分割模型检测到肿瘤 → 输出空 mask → Dice=0
+**HD95 高的原因**: 分割完全失败时 HD95=max_image_diagonal（约 588-724）
+
+### 你的指标分布特点
+
+| 组 | 你的强项 | 你的弱项 |
+|----|---------|---------|
+| Image fidelity | — | MSE, LPIPS（强度不匹配 + GAN 平滑） |
+| ROI tumor | FRD 全场最好 | SSIM_tumor（增强不够精准） |
+| Classification | AUROC Contrast 全场 top 5 | AUROC Tumor-ROI |
+| Segmentation | HD95 还行 | Dice（RV_07 上完全失败） |
+
+### 评估代码路径
+- 主入口: `mama-synth/src/evaluation/evaluate.py`
+- ImageMetrics: `evaluators/image_metrics.py` (MSE, LPIPS)
+- ROIMetrics: `evaluators/roi_metrics.py` (SSIM_tumor, FRD)
+- Classification: `evaluators/classification.py` (AUROC ×2)
+- Segmentation: `evaluators/segmentation.py` (Dice, HD95)
+- 分割模型: `evaluation/models/segmentation/` (nnU-Net)
+- 分类模型: `evaluation/models/classification/` (XGBoost)
