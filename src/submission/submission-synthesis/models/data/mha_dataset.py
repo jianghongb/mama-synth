@@ -107,6 +107,13 @@ class MhaDataset(BaseDataset):
             gt_t = gt_t.flip(-1)
             mask_t = mask_t.flip(-1)
 
+        # Random intensity augmentation (improves cross-scanner generalization)
+        if self.opt.isTrain and getattr(self.opt, 'intensity_aug', False):
+            scale = 0.7 + torch.rand(1).item() * 0.6  # [0.7, 1.3]
+            bias = (torch.rand(1).item() - 0.5) * 0.4  # [-0.2, 0.2]
+            input_t = input_t * scale + bias
+            gt_t = gt_t * scale + bias
+
         # Load breast mask (precomputed or threshold)
         breast_mask_t = None
         if self.dir_breast_mask and os.path.exists(os.path.join(self.dir_breast_mask, fname)):
