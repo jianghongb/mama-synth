@@ -802,3 +802,27 @@ ISPY1_1173, ISPY2_456432, ISPY2_478655, ISPY2_563681, ISPY2_572016, ISPY2_570148
 - **格式**: MHA, float32, z-score normalized, **512×112** (sagittal)
 - **Motion**: 全图检测 43/51 有 motion, 但 breast-masked 后 0/51 — motion 全在胸壁
 - **结论**: 全部纳入训练（v7/v9 breast mask loss 策略下安全使用）
+
+---
+
+## 12. 训练版本 v10
+
+### v10 = v5 超参 + data_split_v4 (2811 cases) + breast mask
+
+| 对比 | v5 | v7 | v9 | v10 |
+|------|----|----|-----|-----|
+| 数据 | data_split (1074) | data_split_v2 (1356) | data_split (1074) | data_split_v4 (2811) |
+| 域数 | 4 (DUKE/ISPY2/ISPY1/NACT) | 4 | 4 | 7 (+LABREAST/YUNNAN/AMBL) |
+| Breast mask | ❌ | ✅ | ✅ | ✅ |
+| Motion filter | 无 motion data | 含 motion | 无 motion | breast-masked filter (仅排除 12 真实 breast motion) |
+| 超参 | MSEC=50 | MSEC=50 | MSEC=50 | MSEC=50 |
+| 训练时间 | 24h | 24h | 24h | 48h (数据量 2.6x) |
+
+**假设**：
+- 更多域 (7 vs 4) → 对 GC 未知数据 (P_*, RV_07) 泛化更好
+- Breast mask → 胸壁不干扰训练
+- 无真实 breast motion → 数据质量好
+- 数据量 2811 vs 1074 → 模型见过更多变化
+
+**训练脚本**: `models/scripts/berzelius_train_v10.sh`
+**状态**: ⏳ 训练中
