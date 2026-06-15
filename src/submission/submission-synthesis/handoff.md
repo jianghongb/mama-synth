@@ -826,3 +826,34 @@ ISPY1_1173, ISPY2_456432, ISPY2_478655, ISPY2_563681, ISPY2_572016, ISPY2_570148
 
 **训练脚本**: `models/scripts/berzelius_train_v10.sh`
 **状态**: ⏳ 训练中
+
+---
+
+## 13. v8 评估结果 & v10/v11 Ablation
+
+### v8 结果 (data_split_v2/test, 150 cases)
+
+v8 = v5 + intensity augmentation（随机 scale + bias），同数据 (data_split, 1074 cases)。
+
+| Metric | v5 | v8 | 改善 |
+|--------|-----|-----|------|
+| MSE ↓ | 0.28 | **0.26** | ✅ |
+| LPIPS ↓ | 0.074 | **0.071** | ✅ |
+| SSIM_tumor ↑ | 0.701 | **0.718** | ✅ |
+| FRD ↓ | 10.41 | **9.77** | ✅ |
+| AUROC ↑ | 0.930 | 0.929 | ≈ |
+| Dice ↑ | 0.684 | **0.708** | ✅ |
+| HD95 ↓ | 55.6 | **37.7** | ✅✅ |
+
+**结论**: intensity augmentation 全面提升，尤其 HD95 改善 32%。确认纳入后续版本。
+
+### v10/v11 Ablation 设计
+
+| 版本 | 数据 | Breast mask | Intensity aug | 目的 |
+|------|------|-------------|---------------|------|
+| v10 | data_split_v4 (2811) | ✅ | ❌ | baseline: 更多数据 + breast mask |
+| v11 | data_split_v4 (2811) | ✅ | ✅ | v10 + intensity aug |
+
+对比 v10 vs v11 可验证：在 2811 cases 多域数据上，intensity augmentation 是否仍有提升（v8 在 1074 cases 上已证明有效）。
+
+**状态**: ⏳ 训练中
