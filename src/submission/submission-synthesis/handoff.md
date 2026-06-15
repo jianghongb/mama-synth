@@ -373,15 +373,33 @@ Pre-contrast → Encoder → 特征图
 2. 方案 1 实现 attention branch（改 GlobalGenerator，加一个 side branch）
 3. 方案 2 作为 ablation 实验或 future work
 
-### 当前训练版本状态
+### 训练版本总览 (v5-v11)
 
-| 版本 | 配置 | 状态 | 结果 |
-|------|------|------|------|
-| v3 (mamasynth_residual) | residual + tumor_weight=10 | ✅ 完成 | MSE=1.32, Dice=0.27 |
-| mamasynth_standard | 无 residual, 无 tumor weight | ⏳ 未开始/进行中 |  |
-| v5 (baseline_norm) | per-image min-max 归一化 | ⏳ 待跑 |  |
-| v6 (tumor+MSSC 加强) | tumor_weight=50 + lambda_mssc=50 | ⏳ 待跑 |  |
-| v7 (attention branch) | 方案1，待实现 | 📝 设计中 |  |
+| 版本 | 数据 | Cases | Breast mask | Intensity aug | 状态 | Test Set | MSE ↓ | LPIPS ↓ | SSIM_t ↑ | FRD ↓ | Dice ↑ | HD95 ↓ |
+|------|------|-------|-------------|---------------|------|----------|-------|---------|----------|-------|--------|--------|
+| **v5** | data_split | 1074 | ❌ | ❌ | ✅ | 150 cases | 0.28 | 0.074 | 0.701 | 10.41 | 0.684 | 55.6 |
+| v6 | data_split_v2 | 1356 | ❌ | ❌ | ✅ | 150 cases | 0.87 | 0.114 | 0.423 | 12.78 | 0.492 | 105.8 |
+| **v7** | data_split_v2 | 1356 | ✅ | ❌ | ✅ | 150 cases | 0.89 | 0.138 | 0.407 | **9.85** | 0.437 | 115.8 |
+| **v8** | data_split | 1074 | ❌ | ✅ | ✅ | 150 cases | **0.26** | **0.071** | **0.718** | **9.77** | **0.708** | **37.7** |
+| v9 | data_split | 1074 | ✅ | ❌ | ✅ | 144 cases | — | — | — | — | — | — |
+| v10 | data_split_v4 | 2811 | ✅ | ❌ | ⏳ | — | — | — | — | — | — | — |
+| v11 | data_split_v4 | 2811 | ✅ | ✅ | ⏳ | — | — | — | — | — | — | — |
+
+#### Yunnan 外部验证 (100 cases, 不在任何训练集中)
+
+| 版本 | MSE ↓ | LPIPS ↓ | SSIM_t ↑ | FRD ↓ |
+|------|-------|---------|----------|-------|
+| v5 | 0.393 | 0.235 | 0.405 | 29.55 |
+| v6 | 0.399 | 0.290 | 0.324 | 30.45 |
+| **v7** | **0.125** | **0.120** | **0.482** | **28.56** |
+
+#### 关键发现
+
+1. **v8 > v5**: intensity augmentation 全面提升，尤其 HD95 (-32%)
+2. **v7 外部泛化最强**: Yunnan 上 MSE 降 3 倍，LPIPS 降一半
+3. **v6 < v5**: motion 数据拉低质量
+4. **Breast mask + intensity_aug 是互补策略**: v7 提升泛化，v8 提升精度
+5. **v10/v11 目标**: 结合两者 + 更多域数据，预期全面最优
 
 ### 方案 4：胸壁 Masking（训练/推理时统一处理）
 
