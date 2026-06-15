@@ -134,7 +134,7 @@ Input → nnUNet breast mask → Resize 512 → Pix2PixHD → Resize back → �
 
 ---
 
-## 14. GC 评估指标重要性 & Breast Masking Pipeline 流程
+## 8. GC 评估指标重要性 & Breast Masking Pipeline 流程
 
 ### GC 排名机制
 
