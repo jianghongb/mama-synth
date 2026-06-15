@@ -9,6 +9,35 @@
 - **格式**: MHA, float32, z-score normalized
 - **分辨率**: 256×256 (64%), 384×384, 448×448, 512×512, 256×60 (sagittal)
 
+### 数据集版本
+
+| 版本 | Cases | 描述 |
+|------|-------|------|
+| data_split | 1074 train / 144 test | 原始 (DUKE, ISPY2, ISPY1, NACT) |
+| data_split_v2 | 1356 train / 150 test | +motion cases |
+| data_split_v3 | 2305 train / 376 test | v2 + LA-Breast (953 train, 226 test) |
+| **data_split_v4** | **2811 train** | 全数据合并，breast-masked motion check，仅排除 12 个真实乳房 motion cases |
+
+### data_split_v4 构成
+
+| 数据源 | Cases | 备注 |
+|--------|-------|------|
+| LABREAST | 1175 | LA-Breast train+val+test 全部 |
+| ISPY2 | 973 | 含 masked-recovered motion cases |
+| DUKE | 280 | 含 masked-recovered, 排除 12 个真实 breast motion |
+| ISPY1 | 168 | 含 masked-recovered |
+| YUNNAN | 100 | 全部（masked 后无 motion）|
+| NACT | 64 | — |
+| AMBL | 51 | 全部（motion 仅在胸壁）|
+| **总计** | **2811** | breast mask 后仅 12 cases 有真实乳房 motion |
+
+### Motion 检测策略
+
+原始 phase correlation 在全图上检测位移，会被胸壁信号变化干扰产生假阳性。
+改进方案：先用 breast mask (pre > -0.4) 遮掉胸壁，仅在乳房区域做 phase correlation。
+结果：原先排除的 236 个 "motion" cases 中，224 个可恢复使用（motion 仅在胸壁区域）。
+这与 v7/v9 的训练策略（breast mask loss）一致——胸壁区域的信号差异不影响训练。
+
 ### 测试数据
 - **本地**: `/Users/ehogjig/git/kth/data_split/test/mha/` — 144 cases
 - **GC validation**: 70 cases (含 P_* 49 + RV_07_* 21 未知数据)

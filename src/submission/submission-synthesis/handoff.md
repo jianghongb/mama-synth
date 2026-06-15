@@ -738,3 +738,67 @@ DICOM (964 folders, 99 patients)
 - Segmentation: `evaluators/segmentation.py` (Dice, HD95)
 - 分割模型: `evaluation/models/segmentation/` (nnU-Net)
 - 分类模型: `evaluation/models/classification/` (XGBoost)
+
+---
+
+## 11. 外部数据整合
+
+### LA-Breast DCE-MRI Dataset
+
+- **来源**: Mendeley Data, DOI: 10.17632/8rzyn3ng9c.1 (CC BY 4.0)
+- **本地路径**: `/Users/ehogjig/Downloads/LA-Breast DCE-MRI Dataset/breast_data/`
+- **描述**: 200 名拉丁美洲患者的乳腺 DCE-MRI，1.5T 扫描，钆基造影剂
+- **序列**: d0 (pre-contrast T1 fat-sat), d1-d5 (5 个 post-contrast phases), t1, t2, dif, adc
+- **格式**: TIFF, uint16, 448×448 或 480×480
+- **元数据**: train/val/test CSV，含 patient, ROI, BIRADS, 病灶坐标
+- **预处理脚本**: `src/preprocessing/preprocess_labreast.py`
+  - input = z-score(d0 × 1.5)
+  - GT = z-score(pixel-wise max(d1-d5) × 1.5)  ← peak enhancement
+  - mask = 椭圆 (Centro_x/y, Distancia_x/y ÷ 2)
+  - scale factor 1.5 使强度分布匹配 MAMA-SYNTH 数据
+- **Motion 检测**: `src/preprocessing/motion_check_labreast.py`
+  - 用 phase correlation 检测 d0 vs d1-d5 位移
+  - Threshold: >2px flagged
+  - 结果: train 73/734, val 8/219, test 7/226 flagged
+
+### Yunnan Dataset
+
+- **来源**: 合作数据（云南医院）
+- **原始数据**: `/Users/ehogjig/Downloads/8068383/` — 100 个 zip，每个含 P0-P5.nii.gz + GT.nii.gz + Breast_mask.nii.gz
+- **已处理**: `/Users/ehogjig/git/kth/yunnan/mha/` — 100 cases (input/ground_truth/mask)
+- **Motion 检测**: 用原始 3D 多时相数据 (P0-P5) 做 phase correlation
+  - 11/100 cases flagged (>2px): YUNNAN_003, 036, 037, 045, 046, 049, 052, 055, 070, 074, 077
+
+### data_split_v4 (最终训练集, breast-masked motion filtering)
+
+```
+/Users/ehogjig/git/kth/data_split_v4/train/mha/
+├── input/          2811 cases
+├── ground_truth/   2811 cases
+└── mask/           2811 cases
+```
+
+构建过程:
+1. 合并 data_split_v2 train (1356) + data_split_v2 test (150)
+2. 加入 LA-Breast train+val+test (1179 预处理后)
+3. 加入 Yunnan (100)
+4. 加入 AMBL (51, motion 仅在胸壁，breast mask 训练不受影响)
+5. Breast-masked motion re-check: 用 breast mask (pre > -0.4) 遮掉胸壁后重新做 phase correlation
+   - 原先排除的 motion cases 大部分可恢复（motion 仅来自胸壁信号变化）
+   - DUKE/ISPY: 149 中恢复 137，仍排除 12 个真实 breast motion cases
+   - Yunnan: 11 全部恢复
+   - LA-Breast: 88 全部恢复
+6. 最终: 2811 cases
+
+仍排除的 12 个真实 breast motion cases:
+DUKE_021, DUKE_306, DUKE_345, DUKE_387, DUKE_408, DUKE_723,
+ISPY1_1173, ISPY2_456432, ISPY2_478655, ISPY2_563681, ISPY2_572016, ISPY2_570148
+
+### AMBL 数据
+
+- **来源**: 合作数据
+- **本地路径**: `/Users/ehogjig/git/kth/ambl_processed/mha/`
+- **数量**: 51 cases
+- **格式**: MHA, float32, z-score normalized, **512×112** (sagittal)
+- **Motion**: 全图检测 43/51 有 motion, 但 breast-masked 后 0/51 — motion 全在胸壁
+- **结论**: 全部纳入训练（v7/v9 breast mask loss 策略下安全使用）
