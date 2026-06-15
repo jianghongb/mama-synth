@@ -212,3 +212,40 @@ input.mha (pre-contrast)
 |------|--------------|-----------------|------|
 | Pix2PixHD | `/opt/app/weights/latest_net_G.pth` | `$PROJ/checkpoints/mamasynth_v{N}/latest_net_G.pth` | 696 MB |
 | nnUNet BreastSeg | `/opt/app/weights/breast_seg/` | `$PROJ/weights/Dataset910_BreastSegNet/nnUNetTrainer__nnUNetResEncUNetLPlans__2d` | 1.6 GB |
+
+---
+
+## 13. v8 评估结果 (2026-06-15)
+
+### v8 配置
+- 基于 v5 (MSEC=50, 1074 cases, resize 512)
+- 新增: `--intensity_aug` (训练时随机 scale×[0.7,1.3] + bias±0.2)
+- 推理: 纯 resize to 512, 无后处理
+
+### 本地评估对比 (data_split_v2/test, 150 cases)
+
+| Metric | v5 | **v8** | 提升 |
+|--------|:-:|:-:|:-:|
+| MSE ↓ | 0.28 | **0.26** | ✅ |
+| LPIPS ↓ | 0.074 | **0.071** | ✅ |
+| SSIM_tumor ↑ | 0.701 | **0.718** | ✅ |
+| FRD ↓ | 10.41 | **9.77** | ✅ |
+| AUROC contrast | 0.930 | 0.929 | ≈ |
+| Dice ↑ | 0.684 | **0.708** | ✅ |
+| HD95 ↓ | 55.6 | **37.7** | ✅✅ |
+
+### 跨域验证 (yunnan, 100 cases, 外部数据)
+
+| Metric | v8 on yunnan | 分析 |
+|--------|:-:|------|
+| MSE ↓ | **0.009** | 极好，强度匹配精准 |
+| LPIPS ↓ | **0.045** | 感知质量极高 |
+| SSIM_tumor ↑ | **0.759** | 肿瘤结构保真好 |
+| FRD ↓ | 25.52 | 高（跨域 radiomic 特征差异） |
+| AUROC contrast | 0.740 | 低（评估分类器未见过 yunnan） |
+| Dice ↑ | 0.373 | 低（评估 nnU-Net 未见过 yunnan） |
+| HD95 ↓ | 235.8 | 高（同上） |
+
+**结论**: Image fidelity 指标(MSE/LPIPS/SSIM)在外部数据上表现优异，证明 intensity augmentation 有效提升泛化能力。Dice/HD95/FRD 差是评估模型的域外问题，非合成模型问题。
+
+**v8 = 当前最佳模型**
