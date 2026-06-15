@@ -574,3 +574,26 @@ v7 是**外部泛化能力最强**的版本。推荐提交 GC validation（GC te
 2. **v5v2 (ablation)**：v5 超参 + data_split_v2 排除 motion (1207 cases)，验证 motion 是否为退化原因
 3. **推理时加 breast mask**：v5 推理时也加上 breast mask 后处理，看是否能获得 v7 类似的泛化提升（零成本实验）
 4. **更强的 breast seg 模型**：当前一些 case 返回空 mask，影响评估准确性
+
+---
+
+## 10. 训练版本 v9
+
+### v9 = v5 + breast mask (最佳数据 + 最佳训练策略)
+
+| 对比 | v5 | v7 | v9 |
+|------|----|----|-----|
+| 数据 | data_split (1074, 无 motion) | data_split_v2 (1356, 含 motion) | data_split (1074, 无 motion) |
+| Breast mask | ❌ | ✅ | ✅ |
+| 其余超参 | MSEC=50 | MSEC=50 | MSEC=50 |
+
+**假设**：
+- v5 数据干净 → 图像质量好（test set 上 LPIPS/SSIM 最优）
+- v7 breast mask → 泛化能力强（Yunnan 外部验证最优）
+- v9 结合两者优势，预期在两个维度都表现好
+
+**训练脚本**: `models/scripts/berzelius_train_v9.sh`
+- 先生成 `data_split/train/mha/breast_mask/`（nnUNet, 一次性）
+- 再训练 200 epochs with `--breast_mask_dir`
+
+**状态**: ⏳ 训练中

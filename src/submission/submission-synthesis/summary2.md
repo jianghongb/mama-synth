@@ -109,6 +109,7 @@ L_msec = Σ_{r=1,1/2,1/4} ||down_r(fake-pre) - down_r(gt-pre)||_1
 | **v6** | v5 + data_split_v2 (含 motion) | 1356 | 0.87 | 0.114 | 0.423 | 0.492 | ✅ 完成 (比v5差) |
 | **v7** | v6 + breast mask (loss only in breast) | 1356 | 0.89 | 0.138 | 0.407 | 0.437 | ✅ 完成 |
 | **v8** | v5 + intensity_aug (scale+bias) | 1074 | — | — | — | — | ⏳ 训练中 |
+| **v9** | v5 + breast mask (loss only in breast) | 1074 | — | — | — | — | ⏳ 训练中 |
 
 ## 进行中
 
