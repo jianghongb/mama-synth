@@ -131,3 +131,84 @@ Input → nnUNet breast mask → Resize 512 → Pix2PixHD → Resize back → �
 - [ ] 选择最佳版本提交 GC
 - [ ] 考虑 ensemble (v8 精度 + v7/v9 泛化)
 - [ ] Attention branch (Supervisor 建议, 让 G 学会定位 lesion)
+
+---
+
+## 14. GC 评估指标重要性 & Breast Masking Pipeline 流程
+
+### GC 排名机制
+
+Grand Challenge 使用 **Mean Position** 排名：8 个指标各自排名，取算术平均。
+
+| 指标 | 权重 | 类型 | 说明 |
+|------|------|------|------|
+| MSE ↓ | 1/8 | 图像级 | 全图像素误差 |
+| LPIPS ↓ | 1/8 | 图像级 | 感知相似度 |
+| SSIM_tumor ↑ | 1/8 | ROI级 | 肿瘤区域结构相似度 |
+| FRD ↓ | 1/8 | 分布级 | Fréchet Radiomics Distance |
+| AUROC_contrast ↑ | 1/8 | 分类 | 造影分类准确率 |
+| AUROC_tumor ↑ | 1/8 | 分类 | 肿瘤ROI分类 |
+| **Dice ↑** | **1/8** | **分割** | **合成图→nnUNet分割→vs GT mask** |
+| **HD95 ↓** | **1/8** | **分割** | **分割边界最大偏差 (P95)** |
+
+### ⚠️ Dice 和 HD95 的特殊重要性
+
+Dice 和 HD95 **不是直接评估合成质量**，而是评估：
+> "用你的合成图像做肿瘤分割，分割结果和 GT 相比有多准确"
+
+这意味着：
+1. **合成的增强信号必须足够强且位置正确** — 否则分割模型找不到肿瘤
+2. **肿瘤边界必须锐利清晰** — 模糊的增强导致分割边界偏移，HD95 暴涨
+3. **不能有假阳性增强** — 胸壁/正常组织的错误增强会让分割模型产生 false positive
+
+Breast masking 对 Dice/HD95 的帮助：
+- **去除胸壁假阳性**：胸壁保持 pre-contrast → 分割模型不会在胸壁区域误检
+- **肿瘤增强更聚焦**：模型容量集中在乳房 → 肿瘤区域合成更精确
+
+### 完整 Breast Masking 训练+推理流程
+
+```
+═══════════════ 训练阶段 ═══════════════
+
+[一次性] 生成 breast masks:
+  data_split_v4/train/mha/input/*.mha
+    → nnUNet (ResEncUNetL, Dataset910)
+    → 10类分割
+    → binary mask (labels {1,2,5,6,9} = 乳房)
+    → data_split_v4/train/mha/breast_mask/*.mha
+
+[每个 epoch] 训练:
+  pre, gt, tumor_mask, breast_mask = load_batch()
+  fake = Generator(pre)               # 模型看全图
+  
+  # 所有 loss 只在乳房区域:
+  loss_GAN   = GAN(fake×bmask, gt×bmask)
+  loss_feat  = L1(D_feat(fake×bmask), D_feat(gt×bmask))
+  loss_VGG   = VGG(fake×bmask, gt×bmask)
+  loss_MSEC  = MSEC((fake-pre)×bmask, (gt-pre)×bmask)
+  loss_tumor = L1(fake×tmask, gt×tmask)
+  
+  loss_G = 1×GAN + 10×feat + 10×VGG + 50×MSEC + 10×tumor
+
+═══════════════ 推理阶段 ═══════════════
+
+input.mha (pre-contrast)
+  │
+  ├─→ nnUNet BreastSeg ─→ breast_mask (binary, 原始分辨率)
+  │
+  ├─→ resize 512×512 ─→ Pix2PixHD (残差模式) ─→ resize back
+  │                                               → synthetic
+  │
+  └─→ output = breast_mask × synthetic + (1 - breast_mask) × input
+       │              │                          │
+       │    乳房: 用合成结果            胸壁: 保留原值
+       │
+       └─→ output.mha
+```
+
+### 权重文件
+
+| 模型 | 路径 (Docker) | 路径 (Berzelius) | 大小 |
+|------|--------------|-----------------|------|
+| Pix2PixHD | `/opt/app/weights/latest_net_G.pth` | `$PROJ/checkpoints/mamasynth_v{N}/latest_net_G.pth` | 696 MB |
+| nnUNet BreastSeg | `/opt/app/weights/breast_seg/` | `$PROJ/weights/Dataset910_BreastSegNet/nnUNetTrainer__nnUNetResEncUNetLPlans__2d` | 1.6 GB |
