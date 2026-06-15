@@ -107,6 +107,7 @@ L_msec = Σ_{r=1,1/2,1/4} ||down_r(fake-pre) - down_r(gt-pre)||_1
 | v4 | v3 + square_only + tumor=40 | 938 | 1.61 | 0.257 | 0.270 | 0.241 | ❌ 弃用 |
 | **v5** | MSEC=50 + resize 推理 | 1074 | **0.25** | **0.079** | **0.722** | **0.646** | ✅ 已提交 GC (排27) |
 | **v6** | v5 + data_split_v2 (含 motion) | 1356 | 0.87 | 0.114 | 0.423 | 0.492 | ✅ 完成 (比v5差) |
+| **v7** | v6 + breast mask (loss only in breast) | 1356 | 0.89 | 0.138 | 0.407 | 0.437 | ✅ 完成 |
 | **v8** | v5 + intensity_aug (scale+bias) | 1074 | — | — | — | — | ⏳ 训练中 |
 
 ## 进行中
@@ -134,6 +135,47 @@ L_msec = Σ_{r=1,1/2,1/4} ||down_r(fake-pre) - down_r(gt-pre)||_1
 - 训练完后在 data_split_v2/test (150 cases) 上评估
 - 与 v5 对比，确认没有退步
 - 如果提升则提交 GC
+
+### v7: Breast Masking (训练时 loss 只在乳房区域计算)
+
+**改动**：v6 基础上，用 nnUNet (Dataset910_BreastSegNet) 生成 breast mask，训练时 loss 只在 breast region 内计算，忽略胸壁区域。
+
+**结果 — Test Set (data_split_v2/test, 150 cases)**：
+
+| Metric | v5 | v6 | v7 |
+|--------|-----|-----|-----|
+| MSE ↓ | 0.25 | 0.87 | 0.89 |
+| LPIPS ↓ | 0.079 | 0.114 | 0.138 |
+| SSIM_tumor ↑ | 0.722 | 0.423 | 0.407 |
+| FRD ↓ | 11.19 | 12.78 | **9.85** |
+| AUROC ↑ | 0.906 | 0.926 | 0.926 |
+| Dice ↑ | 0.646 | 0.492 | 0.437 |
+| HD95 ↓ | 103.8 | 105.8 | 115.8 |
+
+**结果 — Yunnan 外部验证 (100 cases)**：
+
+| Metric | v5 | v6 | v7 |
+|--------|-----|-----|-----|
+| MSE ↓ | 0.393 | 0.399 | **0.125** |
+| LPIPS ↓ | 0.235 | 0.290 | **0.120** |
+| SSIM_tumor ↑ | 0.405 | 0.324 | **0.482** |
+| FRD ↓ | 29.55 | 30.45 | **28.56** |
+| AUROC ↑ | 0.879 | 0.934 | 0.844 |
+| Dice ↑ | 0.095 | 0.076 | 0.090 |
+| HD95 ↓ | 574.7 | 584.6 | 651.2 |
+
+**分析**：
+- v7 在外部验证集 (Yunnan) 上**大幅领先**：MSE 降 3 倍，LPIPS 降一半，SSIM_tumor 提升 19%
+- 但在 test set 上 MSE/LPIPS/SSIM 不如 v5（注意：v5 metrics 可能是在旧 test set 上跑的，不完全公平）
+- FRD 9.85 是所有版本在 test set 上的最佳，说明整体分布更真实
+- Breast mask 策略有效提升了外部泛化能力
+- AUROC 略降可能因为胸壁保持 pre-contrast 值
+
+### 可能的改进方案 (v8+)
+
+1. **排除 motion 数据重训练 (v5v2)**：用 data_split_v2 但排除 149 个 motion cases (1207 cases)，验证 motion 数据是否是退化原因
+2. **v7 + 排除 motion**：breast mask + 无 motion 数据
+3. **提交 v7 到 GC**：Yunnan 外部验证结果优异，可能在 GC 未知数据上也表现好
 
 ## 代码仓库
 

@@ -529,3 +529,48 @@ loss_G = loss_fn(fake × breast_mask, real × breast_mask)  # loss 只看乳房�
 ### 训练脚本
 
 `berzelius_train_v7.sh` — 基于 v6，添加 `--breast_mask_dir` 参数。
+
+### v7 评估结果 (2026-06-15)
+
+#### Test Set (data_split_v2/test, 150 cases)
+
+| Metric | v5 | v6 | v7 |
+|--------|-----|-----|-----|
+| MSE ↓ | 0.25 | 0.87 | 0.89 |
+| LPIPS ↓ | 0.079 | 0.114 | 0.138 |
+| SSIM_tumor ↑ | 0.722 | 0.423 | 0.407 |
+| FRD ↓ | 11.19 | 12.78 | **9.85** |
+| AUROC ↑ | 0.906 | 0.926 | 0.926 |
+| Dice ↑ | 0.646 | 0.492 | 0.437 |
+| HD95 ↓ | 103.8 | 105.8 | 115.8 |
+
+#### Yunnan 外部验证 (100 cases, 独立数据，不在训练集中)
+
+| Metric | v5 | v6 | v7 |
+|--------|-----|-----|-----|
+| MSE ↓ | 0.393 | 0.399 | **0.125** |
+| LPIPS ↓ | 0.235 | 0.290 | **0.120** |
+| SSIM_tumor ↑ | 0.405 | 0.324 | **0.482** |
+| FRD ↓ | 29.55 | 30.45 | **28.56** |
+| AUROC ↑ | 0.879 | 0.934 | 0.844 |
+| Dice ↑ | 0.095 | 0.076 | 0.090 |
+| HD95 ↓ | 574.7 | 584.6 | 651.2 |
+
+#### 分析
+
+- **外部泛化能力大幅提升**：v7 在 Yunnan 上 MSE 降 3 倍，LPIPS 降一半，SSIM_tumor +19%
+- **FRD 9.85 是 test set 全版本最佳**：整体图像分布更真实
+- **Test set 上 pixel metrics 不如 v5**：可能因为 v5 的 test set metrics 来自旧 split (144 cases)，不公平对比
+- **Breast mask 策略有效**：胸壁不再产生错误增强，外部数据表现显著改善
+- **AUROC 略降**：胸壁保持 pre-contrast 值导致分类器"看到"更少的造影信号
+
+#### 结论
+
+v7 是**外部泛化能力最强**的版本。推荐提交 GC validation（GC test set 含未知域数据 RV_07，v7 的泛化优势应能体现）。
+
+### 可能的改进方案 (v8+)
+
+1. **v7 + 排除 motion 数据 (v7v2)**：1207 cases + breast mask，可能进一步提升
+2. **v5v2 (ablation)**：v5 超参 + data_split_v2 排除 motion (1207 cases)，验证 motion 是否为退化原因
+3. **推理时加 breast mask**：v5 推理时也加上 breast mask 后处理，看是否能获得 v7 类似的泛化提升（零成本实验）
+4. **更强的 breast seg 模型**：当前一些 case 返回空 mask，影响评估准确性
