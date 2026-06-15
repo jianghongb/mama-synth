@@ -436,25 +436,79 @@ Pre-contrast → Encoder → 特征图
 
 ---
 
-## 8. Breast Masking Pipeline (v7)
+## 8. Breast Masking Pipeline (v7+) — 实现细节
 
-### 概述
+### 使用的权重
 
-在推理时，用 nnUNet 预训练的 breast segmentation 模型将图像分为"乳房区域"和"胸壁区域"：
-- **乳房区域**: 使用 Pix2PixHD 合成的 post-contrast 结果
-- **胸壁区域**: 直接保留 pre-contrast 原值（胸壁不吸收造影剂，pre ≈ post）
+| 用途 | 模型 | 路径 | 大小 |
+|------|------|------|------|
+| **推理** (Docker) | ResEncUNetL | `weights/breast_seg/` (checkpoint_final.pth) | 1.6 GB |
+| **训练** (Berzelius mask生成) | ResEncUNetL | `$PROJ/weights/Dataset910_BreastSegNet/nnUNetTrainer__nnUNetResEncUNetLPlans__2d` | 1.6 GB |
+| 备选 (较小) | PlainConvUNet | `nnUNet_pretrained_weights/.../nnUNetTrainer__nnUNetPlans__2d` | 515 MB |
 
-### 模型来源
+### 模型详情
 
-- **权重**: `nnUNet_pretrained_weights/Dataset910_BreastSegNet/`
-- **来源**: MAIA server `~/renda/weights/Dataset910_BreastSegNet`
-- **两个变体**:
-  - `nnUNetTrainer__nnUNetPlans__2d` — PlainConvUNet (~268MB)
-  - `nnUNetTrainer__nnUNetResEncUNetLPlans__2d` — ResEncUNetL (~848MB, 效果更好)
-- **训练数据**: 973 个 2D slices ("QihangBreast" dataset)
+- **Dataset**: Dataset910_BreastSegNet (QihangBreast)
+- **训练数据**: 973 个 2D slices
+- **架构**: nnUNetTrainer + ResEncUNetLPlans (Residual Encoder UNet Large)
 - **配置**: 2D, fold_0, ZScoreNormalization
+- **输入通道**: T1
+- **分割标签**: 10 类
 
-### 分割标签
+```
+Labels:
+  0: background   → 排除
+  1: tissue       → 乳房 ✓
+  2: vessel       → 乳房 ✓
+  3: muscle       → 排除（胸壁）
+  4: bone         → 排除
+  5: lesion       → 乳房 ✓
+  6: lymphnode    → 乳房 ✓
+  7: heart        → 排除
+  8: liver        → 排除
+  9: implant      → 乳房 ✓
+
+Breast mask = label ∈ {1, 2, 5, 6, 9}
+```
+
+### 训练时 masking 流程
+
+1. **生成 mask** (`generate_breast_masks.py`):
+   - 输入: `data_split_v4/train/mha/input/*.mha`
+   - 输出: `data_split_v4/train/mha/breast_mask/*.mha`
+   - 使用 `nnUNetPredictor.predict_single_npy_array()`
+   - 一次性生成，后续训练复用
+
+2. **训练时**: `--breast_mask_dir` 参数指定 mask 目录
+   - 所有 loss (GAN, feat, VGG, MSEC, tumor) 只在 breast_mask > 0 区域计算
+   - 模型仍看到完整图像输入，但梯度只来自乳房区域
+
+### 推理时 masking 流程 (`inference.py`)
+
+```python
+# 1. nnUNet 预测 breast mask (原始分辨率)
+breast_mask = predict_breast_mask(seg_predictor, slice_2d)
+
+# 2. Pix2PixHD 合成 (resize 512)
+synthetic = netG(resize_512(pre_contrast))
+
+# 3. 合并: 乳房用合成，胸壁保留原值
+output = where(breast_mask > 0, synthetic, pre_contrast)
+```
+
+### Docker 容器中的路径
+
+```
+/opt/app/weights/
+├── latest_net_G.pth        (696 MB, Pix2PixHD)
+└── breast_seg/             (1.6 GB, nnUNet ResEncUNetL)
+    ├── checkpoint_final.pth
+    ├── plans.json
+    ├── dataset.json
+    └── fold_0/
+```
+
+容器总大小 ~6.3 GB (< 10 GB 限制) ✅
 
 | Label | 类别 | 归属 |
 |-------|------|------|
