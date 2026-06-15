@@ -3,15 +3,15 @@
 #SBATCH -p berzelius
 #SBATCH --gpus=1
 #SBATCH -t 48:00:00
-#SBATCH -J mamasynth_v10
+#SBATCH -J mamasynth_v11
 #SBATCH -o /proj/berzbiomedicalimagingkth/users/x_honji/train_%j.log
 #SBATCH -e /proj/berzbiomedicalimagingkth/users/x_honji/train_%j.err
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=hongjia@kth.se
 #
-# v10: v5 hyperparams + data_split_v4 (2811 cases, multi-domain, no breast motion)
+#  v11: v10 + intensity augmentation (ablation: does aug help with more data?)
 #      + breast mask (loss only in breast region)
-# Combines: best hyperparams (v5) + most data (v4) + breast mask (v7/v9)
+# Combines: v10 (v5 params + data_split_v4 + breast mask) + intensity_aug (from v8)
 
 PROJ=/proj/berzbiomedicalimagingkth/users/x_honji
 
@@ -40,7 +40,7 @@ fi
 cd $PROJ/mama-synth/src/submission/submission-synthesis/models
 
 python train.py \
-  --name mamasynth_v10 \
+  --name mamasynth_v11 \
   --model pix2pixHD \
   --dataset_mode mha \
   --dataroot $PROJ/data_split_v4/train \
@@ -49,6 +49,7 @@ python train.py \
   --input_nc 1 \
   --output_nc 1 \
   --no_instance \
+  --intensity_aug \
   --residual_mode \
   --resize_or_crop resize \
   --loadSize 512 \
