@@ -260,3 +260,44 @@ input.mha (pre-contrast)
 - 方法: 用 Dataset932 生成 pseudo labels → 训练 nnUNet 2D
 - 优势: 推理时也能做精确的 breast+FGT+tumor 分割
 - 状态: ⏳ 待训练 (berzelius_train_breast_seg.sh)
+
+---
+
+## 9. 数据预处理两方案对比
+
+### 方案 A: mask_and_preprocess.py (一体化, Dataset932 4ch 3D)
+
+```
+images/<patient>/<patient>_0000.nii.gz (3D multi-phase DCE)
+  → Exp4x Dataset932 (4ch: P0, P1, d_early, d_late, 3D fullres)
+  → 3 labels: breast / FGT / tumor
+  → breast_mask_3d → 去胸壁 → 选 peak phase → 选最大 tumor slice → z-score
+  → output: input/ ground_truth/ mask/ breast_mask/ (2D MHA)
+```
+- **优点**: 更精确（4 通道专业乳腺分割，含动态增强信息）
+- **缺点**: 慢（~19h GPU），需要 post-contrast 多相数据
+- **权重**: `/Users/ehogjig/git/kth/exp4x_for_maia/Dataset932/nnUNetTrainer__nnUNetPlans__3d_fullres`
+
+### 方案 B: preprocess.py + generate_breast_masks.py (分步, Dataset910 2D)
+
+```
+images/ + segmentations/
+  → preprocess.py (CPU, ~30min): 3D NIfTI → peak phase → tumor slice → z-score → 2D MHA
+  → generate_breast_masks.py (GPU, ~75min): Dataset910 ResEncUNetL 2D, 单通道 T1
+  → output: input/ ground_truth/ mask/ breast_mask/ (2D MHA)
+```
+- **优点**: 快（2h vs 19h），推理时也能用同一模型（只需 pre-contrast）
+- **缺点**: 精度略低（10 类通用模型 vs 3 类专业模型）
+- **权重**: `nnUNet_pretrained_weights/Dataset910_BreastSegNet/nnUNetTrainer__nnUNetResEncUNetLPlans__2d`
+
+### 对比总结
+
+| | 方案 A (Dataset932) | 方案 B (Dataset910) |
+|---|---|---|
+| 输入通道 | 4ch (P0, P1, d_early, d_late) | 1ch (T1 pre-contrast) |
+| 维度 | 3D fullres | 2D |
+| 输出 | 3 类 (breast/FGT/tumor) | 10 类 (tissue/vessel/muscle/bone/...) |
+| 速度 | ~19h (100 cases) | ~2h (100 cases) |
+| 需要 post-contrast | ✅ | ❌ |
+| 推理时可用 | ❌ (需要多 phase) | ✅ (只需 pre) |
+| 用于 | AMBL 数据预处理 | 训练时 mask 生成 + Docker 推理 |
