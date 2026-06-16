@@ -131,12 +131,13 @@ class Preprocessor:
         self.mha_input_dir = self.output_dir / "mha" / "input"
         self.mha_gt_dir = self.output_dir / "mha" / "ground_truth"
         self.mha_mask_dir = self.output_dir / "mha" / "mask"
+        self.mha_breast_mask_dir = self.output_dir / "mha" / "breast_mask"
         self.png_input_dir = self.output_dir / "png" / "input"
         self.png_gt_dir = self.output_dir / "png" / "ground_truth"
         self.png_mask_dir = self.output_dir / "png" / "mask"
         self.plots_dir = self.output_dir / "intensity_plots"
         for d in (
-            self.mha_input_dir, self.mha_gt_dir, self.mha_mask_dir,
+            self.mha_input_dir, self.mha_gt_dir, self.mha_mask_dir, self.mha_breast_mask_dir,
             self.png_input_dir, self.png_gt_dir, self.png_mask_dir,
             self.plots_dir,
         ):
@@ -533,6 +534,7 @@ class Preprocessor:
                                 breast_mask_2d = np.array(_PILImage.fromarray(breast_mask_2d).resize(sz, _PILImage.NEAREST), dtype=np.float32)
                             pre_norm = pre_norm * breast_mask_2d
                             peak_norm = peak_norm * breast_mask_2d
+                            self.save_mha(breast_mask_2d.astype(np.int16), self.mha_breast_mask_dir / f"{fname}.mha", is_label=True)
                         else:
                             logger.warning(f"{patient_id}: no pre-computed breast mask found")
                     except Exception as e:
@@ -551,6 +553,7 @@ class Preprocessor:
                         breast_mask_2d = self.generate_breast_mask(p0_raw, p1_raw, d_early_raw, d_late_raw)
                         pre_norm = pre_norm * breast_mask_2d
                         peak_norm = peak_norm * breast_mask_2d
+                        self.save_mha(breast_mask_2d.astype(np.int16), self.mha_breast_mask_dir / f"{fname}.mha", is_label=True)
                     except Exception as e:
                         logger.warning(f"{patient_id}: breast mask failed: {e}")
 
