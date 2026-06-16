@@ -2,40 +2,69 @@
 
 ## 1. 数据准备阶段
 
+### 方案 A: mask_and_preprocess.py (一体化, Dataset932 4ch)
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│              数据预处理 (两种方案可选)                              │
+│              mask_and_preprocess.py (GPU, ~19h)                   │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  方案 1 [推荐, 快]: preprocess.py + generate_breast_masks.py     │
-│  ─────────────────────────────────────────────────────────────  │
+│  images/<patient>/<patient>_0000.nii.gz  (3D multi-phase DCE)   │
+│  segmentations/<patient>.nii.gz          (3D tumour seg)        │
+│       │                                                         │
+│       ▼                                                         │
+│  ┌────────────────────────────────┐                             │
+│  │  Exp4x Dataset932 (4ch, 3D)   │                             │
+│  │  输入: P0, P1, d_early, d_late │                             │
+│  │  输出: 3 labels (breast/FGT/tumor)                           │
+│  └────────────────────────────────┘                             │
+│       │                                                         │
+│       ▼                                                         │
+│  breast_mask_3d (binary: label ∈ {1,2,3})                       │
+│       │                                                         │
+│       ▼                                                         │
+│  所有 phase × breast_mask → 去胸壁                               │
+│       │                                                         │
+│       ▼                                                         │
+│  选 peak phase → 选最大 tumour slice → z-score 归一化            │
+│       │                                                         │
+│       ▼                                                         │
+│  output/mha/                                                    │
+│    ├── input/         (2D pre-contrast, masked, z-score)        │
+│    ├── ground_truth/  (2D subtraction, masked, z-score)         │
+│    ├── mask/          (2D tumour mask)                           │
+│    └── breast_mask/   (2D breast mask)                          │
 │                                                                 │
-│  Step A: preprocess.py (CPU, ~30min)                            │
-│    images/  + segmentations/ → 2D MHA (input/gt/mask)           │
+│  优点: 更精确 (4ch 专业乳腺分割)                                  │
+│  缺点: 慢 (~19h GPU), 需要 post-contrast 数据                    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 方案 B: preprocess.py + generate_breast_masks.py (分步, Dataset910 2D)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│              分步执行 (~2h 总计)                                   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Step 1: preprocess.py (CPU, ~30min)                            │
+│    images/ + segmentations/ → 2D MHA                            │
 │    (3D NIfTI → 选 peak phase → 选 tumor 最大 slice → z-score)   │
+│    不做 breast masking                                           │
 │                                                                 │
-│  Step B: generate_breast_masks.py --model_type 910 (GPU, ~75min)│
-│    mha/input/ ──→ Dataset910 (ResEncUNet 2D, 1ch T1)            │
+│  Step 2: generate_breast_masks.py --model_type 910 (GPU, ~75min)│
+│    mha/input/ ──→ Dataset910 (ResEncUNet 2D, 单通道 T1)         │
 │                   输出: breast_mask/ (binary .mha)               │
 │                   breast = label 1+2+5+6+9                      │
 │                                                                 │
-│  ─────────────────────────────────────────────────────────────  │
-│  方案 2 [精确, 慢 19h]: mask_and_preprocess.py                   │
-│  ─────────────────────────────────────────────────────────────  │
-│                                                                 │
-│  一体化: 用 Dataset932 (4ch 3D fullres) 生成 breast mask          │
-│    输入: P0, P1, d_early, d_late (从 3D multi-phase 构造)        │
-│    输出: breast+FGT+tumor 分割 (更精确)                          │
-│    然后 mask 应用到数据 + 提取 2D slice + z-score                 │
-│                                                                 │
-├─────────────────────────────────────────────────────────────────┤
-│  最终输出:                                                       │
 │  output/mha/                                                    │
 │    ├── input/         (2D pre-contrast, z-score float32)        │
 │    ├── ground_truth/  (2D subtraction, z-score float32)         │
 │    ├── mask/          (2D tumour mask, binary)                  │
 │    └── breast_mask/   (2D breast mask, binary)                  │
 │                                                                 │
+│  优点: 快 (2h vs 19h), 推理时也能用同一模型                       │
+│  缺点: 精度略低 (10类通用模型 vs 3类专业模型)                      │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
