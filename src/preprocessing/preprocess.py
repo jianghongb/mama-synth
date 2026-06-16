@@ -137,7 +137,8 @@ class Preprocessor:
         self.png_mask_dir = self.output_dir / "png" / "mask"
         self.plots_dir = self.output_dir / "intensity_plots"
         for d in (
-            self.mha_input_dir, self.mha_gt_dir, self.mha_mask_dir, self.mha_breast_mask_dir,
+            self.mha_input_dir, self.mha_gt_dir, self.mha_mask_dir,
+            *([self.mha_breast_mask_dir] if (self.breast_mask_dir or self.breast_mask_model) else []),
             self.png_input_dir, self.png_gt_dir, self.png_mask_dir,
             self.plots_dir,
         ):
