@@ -62,7 +62,7 @@ class BreastSegmentor:
         device = torch.device(self._device_str)
         self._predictor = nnUNetPredictor(
             tile_step_size=0.5, use_gaussian=True, use_mirroring=False,
-            perform_everything_on_device=False,
+            perform_everything_on_device=True,
             device=device, verbose=False, allow_tqdm=True,
         )
         self._predictor.initialize_from_trained_model_folder(
