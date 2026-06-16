@@ -82,6 +82,9 @@ class MhaDataset(BaseDataset):
             mask_arr = np.zeros_like(input_arr)
 
         # Store original shape
+        input_arr = input_arr.squeeze()
+        gt_arr = gt_arr.squeeze()
+        mask_arr = mask_arr.squeeze()
         orig_h, orig_w = input_arr.shape
 
         # Convert to tensors [1, H, W]
