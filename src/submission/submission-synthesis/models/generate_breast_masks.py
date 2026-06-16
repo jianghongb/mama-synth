@@ -69,7 +69,7 @@ def main():
             'origin': (0.0, 0.0, 0.0),
             'direction': (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0),
         },
-        'spacing': [1.0, 1.0, 1.0],
+        'spacing': [2.0, 0.703, 0.703] if args.model_type == "932" else [1.0, 1.0, 1.0],
     }
 
     breast_labels = BREAST_LABELS_932 if args.model_type == "932" else BREAST_LABELS_910
@@ -98,10 +98,10 @@ def main():
             d_late = d_early            # approximate (only 1 phase available)
 
             # Shape: (1, 4, 1, H, W) for 3D model with single slice
-            input_arr = np.stack([p0, p1, d_early, d_late])[np.newaxis, :, np.newaxis, :, :]
+            input_arr = np.stack([p0, p1, d_early, d_late])[:, np.newaxis, :, :]  # (4, 1, H, W)
         else:
             # 1-channel: T1 only
-            input_arr = sl[np.newaxis, np.newaxis, np.newaxis, :, :]  # (1, 1, 1, H, W)
+            input_arr = sl[np.newaxis, np.newaxis, :, :]  # (1, 1, H, W)
 
         pred = predictor.predict_single_npy_array(input_arr, props, None, None, False)
 
