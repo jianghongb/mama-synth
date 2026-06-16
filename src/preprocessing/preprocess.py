@@ -85,6 +85,7 @@ class Preprocessor:
         skip_ambiguous_shapes: bool = False,
         target_size: int = None,
         breast_mask_model: str = None,
+        breast_mask_dir: str = None,
     ):
         """
         Args:
@@ -119,6 +120,7 @@ class Preprocessor:
         self.skip_ambiguous_shapes = skip_ambiguous_shapes
         self.target_size = target_size
         self.breast_mask_model = breast_mask_model
+        self.breast_mask_dir = Path(breast_mask_dir) if breast_mask_dir else None
         self._breast_predictor = None
         logger.info(
             f"Global normalisation stats loaded from {global_stats_path}: "
@@ -517,7 +519,26 @@ class Preprocessor:
                     mask_2d = np.array(_PILImage.fromarray(mask_2d.astype(np.float32)).resize(sz, _PILImage.NEAREST), dtype=np.int16)
 
                 # Step 4b – apply breast mask (optional)
-                if self.breast_mask_model:
+                # Option 1: Load from pre-computed 3D mask directory
+                if self.breast_mask_dir:
+                    try:
+                        bm_path = self.breast_mask_dir / f"{patient_id}.nii.gz"
+                        if bm_path.exists():
+                            bm_3d = nib.load(str(bm_path)).get_fdata().astype(np.float32)
+                            breast_mask_2d = self.extract_slice(bm_3d, largest_slice, slice_axis)
+                            breast_mask_2d = np.rot90(breast_mask_2d, k=1)
+                            if self.target_size is not None:
+                                from PIL import Image as _PILImage
+                                sz = (self.target_size, self.target_size)
+                                breast_mask_2d = np.array(_PILImage.fromarray(breast_mask_2d).resize(sz, _PILImage.NEAREST), dtype=np.float32)
+                            pre_norm = pre_norm * breast_mask_2d
+                            peak_norm = peak_norm * breast_mask_2d
+                        else:
+                            logger.warning(f"{patient_id}: no pre-computed breast mask found")
+                    except Exception as e:
+                        logger.warning(f"{patient_id}: breast mask (dir) failed: {e}")
+                # Option 2: Generate on-the-fly with nnUNet model
+                elif self.breast_mask_model:
                     try:
                         p0_raw = phase_images_2d[pre_phase]
                         p1_raw = phase_images_2d[peak_phase]
@@ -627,6 +648,10 @@ def main():
         "--breast_mask_model", type=str, default=None,
         help="Path to nnUNet breast seg model dir (Dataset932 4ch). If set, generates and applies breast mask."
     )
+    parser.add_argument(
+        "--breast_mask_dir", type=str, default=None,
+        help="Path to pre-computed 3D breast masks (patient_id.nii.gz). Extracts matching 2D slice and applies."
+    )
     args = parser.parse_args()
 
     image_dir = Path(args.image_dir)
@@ -654,6 +679,7 @@ def main():
         skip_ambiguous_shapes=args.skip_ambiguous_shapes,
         target_size=args.target_size,
         breast_mask_model=args.breast_mask_model,
+        breast_mask_dir=getattr(args, 'breast_mask_dir', None),
     )
 
     logger.info("Starting preprocessing pipeline...")
