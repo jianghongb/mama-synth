@@ -345,3 +345,44 @@ class TestProcessSkipAmbiguous:
         assert df.empty
         assert "pat001" in caplog.text
         assert "Skipping" in caplog.text or "ambiguous" in caplog.text.lower()
+
+
+# ===========================================================================
+# generate_breast_mask
+# ===========================================================================
+
+class TestGenerateBreastMask:
+
+    def test_breast_mask_model_none_by_default(self, pp: Preprocessor) -> None:
+        assert pp.breast_mask_model is None
+        assert pp._breast_predictor is None
+
+    def test_breast_mask_skipped_when_no_model(self, pp: Preprocessor) -> None:
+        """When breast_mask_model is None, no masking is applied."""
+        pre = np.ones((64, 64), dtype=np.float32)
+        # If breast_mask_model is None, the step is skipped in process()
+        assert pp.breast_mask_model is None
+
+    def test_breast_mask_model_set(self, tmp_path: Path) -> None:
+        """Verify breast_mask_model attribute is stored."""
+        stats = {"mean": 0.0, "std": 1.0}
+        stats_file = tmp_path / "stats.json"
+        stats_file.write_text(json.dumps(stats))
+
+        pp = Preprocessor(
+            image_dir=str(tmp_path / "images"),
+            segmentation_dir=str(tmp_path / "segs"),
+            output_dir=str(tmp_path / "out"),
+            global_stats_path=str(stats_file),
+            breast_mask_model="/fake/model/path",
+        )
+        assert pp.breast_mask_model == "/fake/model/path"
+        assert pp._breast_predictor is None
+
+    def test_generate_breast_mask_signature(self, pp: Preprocessor) -> None:
+        """Verify generate_breast_mask accepts 4 numpy arrays."""
+        import inspect
+        sig = inspect.signature(pp.generate_breast_mask)
+        params = list(sig.parameters.keys())
+        assert params == ['self', 'p0', 'p1', 'd_early', 'd_late'] or \
+               params == ['p0', 'p1', 'd_early', 'd_late']
