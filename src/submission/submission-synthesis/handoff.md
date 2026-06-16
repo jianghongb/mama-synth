@@ -236,3 +236,26 @@ input.mha (pre-contrast)
 - 本地: MSE=0.26, LPIPS=0.071, SSIM=0.718, Dice=0.708, HD95=37.7
 - Yunnan: MSE=0.009, LPIPS=0.045, SSIM=0.759
 - 详见 Section 4 对比表格
+
+---
+
+## 14. Breast Segmentation 模型对比
+
+### 可用模型 (weights/breast_seg/)
+
+| | Dataset910 (PlainConv 2D) | Dataset910 (ResEncUNet 2D) | Dataset932 (3D fullres) |
+|---|---|---|---|
+| 路径 | `nnUNetTrainer__nnUNetPlans__2d` | `nnUNetTrainer__nnUNetResEncUNetLPlans__2d` | `nnUNetTrainer__nnUNetPlans__3d_fullres` |
+| 输入 | 1ch: T1 (pre-contrast) | 1ch: T1 (pre-contrast) | 4ch: P0, P1, d_early, d_late |
+| 输出 | 10类 (tissue, vessel, muscle, bone, lesion, lymphnode, heart, liver, implant) | 同左 | 4类 (breast, FGT, tumor) |
+| 训练数据 | 973 cases | 973 cases | 1280 cases |
+| 架构 | 标准卷积 | **残差编码器 (更精确)** | 3D fullres |
+| 推理时可用 | ✅ | ✅ | ❌ (需要 post-contrast) |
+| Breast mask 提取 | label 1+2+5+6+9 | label 1+2+5+6+9 | label 1+2+3 |
+| 适用场景 | 推理时 breast mask | 推理时 breast mask (更好) | 训练时 breast mask (最准) |
+
+### Dataset933 (计划中)
+- 目标: 单通道 T1 输入，输出 breast/FGT/tumor (3类)
+- 方法: 用 Dataset932 生成 pseudo labels → 训练 nnUNet 2D
+- 优势: 推理时也能做精确的 breast+FGT+tumor 分割
+- 状态: ⏳ 待训练 (berzelius_train_breast_seg.sh)
