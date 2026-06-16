@@ -69,7 +69,9 @@ def process_case(case_dir: Path, patient_id: str, norm_mean: float, norm_std: fl
 
     phases = {}
     for pf in phase_files:
-        idx = int(pf.stem.replace("P", ""))
+        # Handle .nii.gz double extension: P0.nii.gz -> stem is "P0.nii" or "P0"
+        name = pf.name.split(".")[0]  # "P0"
+        idx = int(name.replace("P", ""))
         phases[idx] = load_nifti(pf)
 
     # Load breast mask and tumour GT
