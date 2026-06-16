@@ -419,7 +419,7 @@ class Preprocessor:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             self._breast_predictor = nnUNetPredictor(
                 tile_step_size=0.5, use_gaussian=True, use_mirroring=False,
-                perform_everything_on_device=(device.type == "cuda"),
+                perform_everything_on_device=True,
                 device=device, verbose=False, allow_tqdm=False)
             self._breast_predictor.initialize_from_trained_model_folder(
                 self.breast_mask_model, use_folds=(0,), checkpoint_name="checkpoint_final.pth")
