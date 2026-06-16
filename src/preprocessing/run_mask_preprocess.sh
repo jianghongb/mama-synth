@@ -37,8 +37,7 @@ python $PROJ/mama-synth/src/preprocessing/preprocess.py \
     --seg_dir ${PROJ}/segmentations/automatic \
     --output_dir ${OUTPUT} \
     --global_stats ${PROJ}/mama-synth/src/preprocessing/training_pre_stats.json \
-    --skip_ambiguous_shapes \
-    --exclude_list ${PROJ}/mama-synth/src/preprocessing/motion_cases.txt
+    --skip_ambiguous_shapes
 
 # Step 2: Generate breast masks using Dataset910 (2D, fast ~2s/case)
 echo "=== Step 2: Generate breast masks (Dataset910, 2D) ==="
