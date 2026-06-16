@@ -401,8 +401,15 @@ class Preprocessor:
     # Main pipeline
     # ------------------------------------------------------------------
 
-    def generate_breast_mask(self, pre_2d: np.ndarray, sub_2d: np.ndarray) -> np.ndarray:
-        """Generate breast mask using Dataset932 (4ch nnUNet) from pre and subtraction."""
+    def generate_breast_mask(self, p0: np.ndarray, p1: np.ndarray, d_early: np.ndarray, d_late: np.ndarray) -> np.ndarray:
+        """Generate breast mask using Dataset932 (4ch nnUNet).
+        
+        Args:
+            p0: pre-contrast (phase 0)
+            p1: peak enhancement phase
+            d_early: P1 - P0 (early subtraction)
+            d_late: P4 - P1 (late subtraction, last phase minus peak)
+        """
         if self._breast_predictor is None:
             import torch
             os.environ.setdefault("nnUNet_raw", "/tmp/nnunet_raw")
@@ -418,10 +425,6 @@ class Preprocessor:
                 self.breast_mask_model, use_folds=(0,), checkpoint_name="checkpoint_final.pth")
             logger.info(f"Breast seg model loaded from {self.breast_mask_model}")
 
-        p0 = pre_2d
-        d_early = sub_2d
-        p1 = p0 + d_early
-        d_late = d_early
         # (4, 1, H, W) for 3D model
         input_arr = np.stack([p0, p1, d_early, d_late])[:, np.newaxis, :, :]
         props = {'sitk_stuff': {'spacing': (2.0, 0.703, 0.703), 'origin': (0,0,0),
@@ -516,7 +519,15 @@ class Preprocessor:
                 # Step 4b – apply breast mask (optional)
                 if self.breast_mask_model:
                     try:
-                        breast_mask_2d = self.generate_breast_mask(pre_norm, peak_norm - pre_norm)
+                        p0_raw = phase_images_2d[pre_phase]
+                        p1_raw = phase_images_2d[peak_phase]
+                        d_early_raw = p1_raw - p0_raw
+                        # d_late: use last phase - peak phase (if available)
+                        all_phases = sorted(phase_images_2d.keys())
+                        last_phase = all_phases[-1]
+                        p4_raw = phase_images_2d[last_phase]
+                        d_late_raw = p4_raw - p1_raw
+                        breast_mask_2d = self.generate_breast_mask(p0_raw, p1_raw, d_early_raw, d_late_raw)
                         pre_norm = pre_norm * breast_mask_2d
                         peak_norm = peak_norm * breast_mask_2d
                     except Exception as e:
