@@ -12,9 +12,13 @@ PROJ=/proj/berzbiomedicalimagingkth/users/x_honji
 export CONDA_PKGS_DIRS=$PROJ/.conda/pkgs
 export PIP_CACHE_DIR=$PROJ/.pip_cache
 export XDG_CACHE_HOME=$PROJ/.cache
+mkdir -p $CONDA_PKGS_DIRS $PIP_CACHE_DIR $XDG_CACHE_HOME
 
-source activate /proj/berzbiomedicalimagingkth/users/x_honji/.conda/envs/pix2pix || \
-    source /proj/berzbiomedicalimagingkth/users/x_honji/miniconda3/bin/activate pix2pix
+module load Miniforge3/25.3.1-0
+eval "$(conda shell.bash hook)"
+conda activate $PROJ/envs/gan
+
+pip show nnunetv2 > /dev/null 2>&1 || pip install nnunetv2 dynamic-network-architectures
 
 export nnUNet_raw="/tmp/nnUNet_raw"
 export nnUNet_preprocessed="/tmp/nnUNet_preprocessed"
