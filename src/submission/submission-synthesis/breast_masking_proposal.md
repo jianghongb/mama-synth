@@ -1,120 +1,124 @@
-# Breast Masking 方案对比 (供 Supervisor 讨论)
+# Breast Masking 方案 — 最终决策 & 实现
 
-## 方案 A: 在 Preprocess 阶段嵌入 Breast Mask
+## 决策摘要
+
+| 阶段 | 方案 | 模型 | 说明 |
+|------|------|------|------|
+| **数据准备** | 方案 A: Preprocess 阶段嵌入 | Exp4x Dataset932 (4ch, 3D) | 高质量 mask，去胸壁后保存 |
+| **训练** | Loss 限制在 breast 区域 | — | 训练数据已 masked |
+| **推理** | 不用 mask | — | 纯 Generator 直通 |
+
+**理由：**
+- 训练时用高质量 3D mask 去胸壁 → 模型学会只增强乳腺区域
+- 推理时不需要额外分割模型 → Docker 体积小（~1.5 GB），推理快
+- v9 结果证明 breast mask 训练对 tumor 指标有显著提升
+
+---
+
+## 实现: mask_and_preprocess.py
 
 ```
-原始 3D NIfTI (pre + post phases + segmentation)
+原始 3D NIfTI (multi-phase DCE + tumour segmentation)
          │
          ▼
 ┌─────────────────────────────────────────────────────┐
-│  Preprocess Pipeline (修改版)                         │
+│  mask_and_preprocess.py                              │
 ├─────────────────────────────────────────────────────┤
 │                                                     │
-│  Step 1-6: 正常流程 (提取 2D slice, 计算 subtraction) │
+│  Step 1: 加载所有 phase + tumour seg                 │
 │         │                                           │
 │         ▼                                           │
-│  Step 6.5 [新增]: 生成 Breast Mask                   │
-│                                                     │
-│    pre + GT ──→ 构造 4 通道 ──→ Dataset932 (nnUNet)  │
-│                  P0, P1,          │                  │
-│                  d_early, d_late   ▼                 │
-│                              breast_mask (label 1+2+3)
+│  Step 2: 构造 4 通道输入                              │
+│    P0 = phase[0] (pre-contrast)                     │
+│    P1 = phase[1] (first post)                       │
+│    d_early = P1 - P0                                │
+│    d_late = phase[-1] - P1                          │
 │         │                                           │
 │         ▼                                           │
-│  Step 7: Z-score 归一化                              │
-│                                                     │
-│  Step 7.5 [新增]: 应用 Breast Mask                   │
-│    pre_norm  = pre_norm × breast_mask  (胸壁→0)     │
-│    sub_norm  = sub_norm × breast_mask  (胸壁→0)     │
+│  Step 3: Exp4x (Dataset932, nnUNet 3D fullres)      │
+│    输入: 4ch → 输出: breast(1) + FGT(2) + tumor(3)  │
+│    breast_mask = label ∈ {1, 2, 3}                  │
 │         │                                           │
 │         ▼                                           │
-│  Step 8: 保存 MHA                                    │
-│    input.mha       ← masked pre (胸壁已置零)         │
-│    ground_truth.mha ← masked subtraction            │
-│    mask.mha         ← tumor mask (不变)             │
-│    breast_mask.mha  ← breast mask [新增输出]         │
+│  Step 4: 去胸壁                                      │
+│    all_phases × breast_mask → masked phases         │
+│         │                                           │
+│         ▼                                           │
+│  Step 5: 选 peak phase + 最大 tumour slice           │
+│         │                                           │
+│         ▼                                           │
+│  Step 6: Z-score 归一化 + 旋转 90° CCW              │
+│         │                                           │
+│         ▼                                           │
+│  Step 7: 保存                                        │
+│    mha/input/         ← masked pre-contrast (2D)    │
+│    mha/ground_truth/  ← masked peak-enhancement     │
+│    mha/mask/          ← tumour mask                 │
+│    mha/breast_mask/   ← breast mask (备用)           │
 │                                                     │
 └─────────────────────────────────────────────────────┘
 ```
 
-**优点:**
-- 数据预处理完即可直接训练，不需要额外步骤
-- 保证训练数据一致性（所有 case 都经过相同处理）
+---
 
-**缺点:**
-- 修改原始数据，不可逆（除非保留未 mask 版本）
-- 换 mask 策略需要重跑整个 preprocess（~1h/dataset）
-- Dataset932 需要 GPU，增加 preprocess 硬件要求
-- 推理时仍然没有 post-contrast，无法用 Dataset932 做 mask
+## 数据清洗: Motion 排除
+
+- **Motion list**: `src/preprocessing/motion_cases.txt` (160 cases)
+- 通过 `--exclude_list` 参数在预处理时排除
+- 来源: 手动标注的存在 motion artifact 的 cases
 
 ---
 
-## 方案 B: Preprocess 不变，训练时动态加载 Mask (当前实现)
+## 运行方式
 
-```
-Step 1: Preprocess (不修改，只跑一次)
-─────────────────────────────────────
-原始 3D NIfTI ──→ 2D MHA (input, ground_truth, mask)
-                  (干净数据，无 masking)
+### 本地测试 (Mac MPS, ~2 min/case)
 
-Step 2: 生成 Breast Mask (独立步骤，可反复执行)
-─────────────────────────────────────
-generate_breast_masks.py
-  --input_dir mha/input
-  --gt_dir mha/ground_truth
-  --model_type 932
-  --model_dir Dataset932/...
-       │
-       ▼
-  breast_mask/ 目录 (每个 case 一个 .mha)
-
-Step 3: 训练 (通过参数控制是否用 mask)
-─────────────────────────────────────
-python train.py \
-  --dataroot /path/to/data \
-  --breast_mask_dir /path/to/breast_mask  ← 有这个参数就用 mask
-                                          ← 没有就不用
-
-训练时 dataset 自动:
-  input  = input × breast_mask   (胸壁→0)
-  gt     = gt × breast_mask      (胸壁→0)
-  loss 只在 breast 区域计算
+```bash
+python src/preprocessing/mask_and_preprocess.py \
+    --image_dir /path/to/images \
+    --seg_dir /path/to/segmentations/automatic \
+    --output_dir /path/to/output \
+    --global_stats src/preprocessing/training_pre_stats.json \
+    --breast_model_dir /path/to/exp4x_for_maia/Dataset932/nnUNetTrainer__nnUNetPlans__3d_fullres \
+    --skip_ambiguous_shapes \
+    --exclude_list src/preprocessing/motion_cases.txt
 ```
 
-**优点:**
-- 原始数据不被修改
-- 灵活：随时开关 mask，换模型重新生成即可
-- 可以 A/B 对比有无 mask 的效果
-- Preprocess 不需要 GPU
+### Berzelius GPU (SLURM, ~10s/case)
 
-**缺点:**
-- 需要额外步骤（generate_breast_masks.py）
-- 训练前需要确认 mask 已生成
-
----
-
-## 推理阶段 (两种方案都一样)
-
-```
-推理时只有 pre-contrast，无法用 Dataset932。
-
-选项:
-  A) 不用 breast mask (当前 v8，效果最好)
-  B) 用 Dataset910 (单通道 T1，可在推理时跑)
-  C) 用简单阈值 (Otsu 自适应)
+```bash
+sbatch src/preprocessing/run_mask_preprocess.sh
 ```
 
 ---
 
-## 建议
+## 推理阶段 (无 mask)
 
-| 场景 | 推荐方案 |
-|------|---------|
-| 快速实验对比 | **方案 B** (灵活，当前已实现) |
-| 最终生产 pipeline | 方案 A 或 B 均可 |
-| 推理时 | 不用 mask (v8 证明不需要) |
+```
+Input.mha → resize 512 → Pix2PixHD (residual) → resize back → Output.mha
+```
 
-**关键问题请 Supervisor 确认：**
-1. 训练时 breast mask 的价值：v8 (无 mask) 已是最佳，v7/v9 (有 mask) 反而更差。是否还要继续探索？
-2. 如果要用 Dataset932 做 mask，只能在训练阶段用（推理时没有 post-contrast）。这个限制是否可接受？
-3. 是否需要在 preprocess 阶段就固化 mask，还是保持训练时灵活加载？
+- 不需要 nnUNet breast segmentation
+- Docker 只需打包 Generator 权重 (696 MB)
+- 推理时间 << 10 min/case on T4
+
+---
+
+## 实验结论
+
+### Breast mask 对训练的影响
+
+| 对比 | 数据 | SSIM_tumor | Dice | HD95 |
+|------|------|:-:|:-:|:-:|
+| v5 (无 mask) | data_split | 0.351 | 0.320 | 235.9 |
+| **v9 (有 mask)** | data_split | **0.447** | **0.472** | **124.8** |
+| 提升 | | +27% | +47% | -47% |
+
+### Yunnan 外部验证
+
+| 对比 | SSIM_tumor | Dice | FRD |
+|------|:-:|:-:|:-:|
+| v5 (无 mask) | 0.405 | 0.095 | 29.55 |
+| **v9 (有 mask)** | **0.818** | **0.474** | **24.94** |
+
+**结论**: Breast mask 在训练阶段的作用明确 — 大幅提升 tumor 区域合成质量和下游分割指标。推理时不需要 mask 因为模型已经学会只在乳腺区域产生增强信号。
