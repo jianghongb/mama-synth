@@ -84,6 +84,7 @@ class Preprocessor:
         global_stats_path: str = None,
         skip_ambiguous_shapes: bool = False,
         target_size: int = None,
+        breast_mask_model: str = None,
     ):
         """
         Args:
@@ -117,6 +118,8 @@ class Preprocessor:
         self.global_norm_std = float(stats['std'])
         self.skip_ambiguous_shapes = skip_ambiguous_shapes
         self.target_size = target_size
+        self.breast_mask_model = breast_mask_model
+        self._breast_predictor = None
         logger.info(
             f"Global normalisation stats loaded from {global_stats_path}: "
             f"mean={self.global_norm_mean:.4f}, std={self.global_norm_std:.4f}"
@@ -398,6 +401,36 @@ class Preprocessor:
     # Main pipeline
     # ------------------------------------------------------------------
 
+    def generate_breast_mask(self, pre_2d: np.ndarray, sub_2d: np.ndarray) -> np.ndarray:
+        """Generate breast mask using Dataset932 (4ch nnUNet) from pre and subtraction."""
+        if self._breast_predictor is None:
+            import torch
+            os.environ.setdefault("nnUNet_raw", "/tmp/nnunet_raw")
+            os.environ.setdefault("nnUNet_preprocessed", "/tmp/nnunet_preprocessed")
+            os.environ.setdefault("nnUNet_results", "/tmp/nnunet_results")
+            from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            self._breast_predictor = nnUNetPredictor(
+                tile_step_size=0.5, use_gaussian=True, use_mirroring=False,
+                perform_everything_on_device=(device.type == "cuda"),
+                device=device, verbose=False, allow_tqdm=False)
+            self._breast_predictor.initialize_from_trained_model_folder(
+                self.breast_mask_model, use_folds=(0,), checkpoint_name="checkpoint_final.pth")
+            logger.info(f"Breast seg model loaded from {self.breast_mask_model}")
+
+        p0 = pre_2d
+        d_early = sub_2d
+        p1 = p0 + d_early
+        d_late = d_early
+        # (4, 1, H, W) for 3D model
+        input_arr = np.stack([p0, p1, d_early, d_late])[:, np.newaxis, :, :]
+        props = {'sitk_stuff': {'spacing': (2.0, 0.703, 0.703), 'origin': (0,0,0),
+                  'direction': (1,0,0,0,1,0,0,0,1)}, 'spacing': [2.0, 0.703, 0.703]}
+        pred = self._breast_predictor.predict_single_npy_array(input_arr, props, None, None, False)
+        while pred.ndim > 2:
+            pred = pred[0]
+        return np.isin(pred, [1, 2, 3]).astype(np.float32)
+
     def process(self) -> pd.DataFrame:
         """Process all patients and return a summary DataFrame."""
         patient_phases = self.get_patient_phases()
@@ -479,6 +512,15 @@ class Preprocessor:
                     pre_norm = np.array(_PILImage.fromarray(pre_norm).resize(sz, _PILImage.BICUBIC), dtype=np.float32)
                     peak_norm = np.array(_PILImage.fromarray(peak_norm).resize(sz, _PILImage.BICUBIC), dtype=np.float32)
                     mask_2d = np.array(_PILImage.fromarray(mask_2d.astype(np.float32)).resize(sz, _PILImage.NEAREST), dtype=np.int16)
+
+                # Step 4b – apply breast mask (optional)
+                if self.breast_mask_model:
+                    try:
+                        breast_mask_2d = self.generate_breast_mask(pre_norm, peak_norm - pre_norm)
+                        pre_norm = pre_norm * breast_mask_2d
+                        peak_norm = peak_norm * breast_mask_2d
+                    except Exception as e:
+                        logger.warning(f"{patient_id}: breast mask failed: {e}")
 
                 self.save_mha(pre_norm,  self.mha_input_dir  / f"{fname}.mha")
                 self.save_mha(peak_norm, self.mha_gt_dir      / f"{fname}.mha")
@@ -570,6 +612,10 @@ def main():
         "--target_size", type=int, default=None,
         help="Resize all output slices to target_size x target_size (e.g. 448). Default: no resize."
     )
+    parser.add_argument(
+        "--breast_mask_model", type=str, default=None,
+        help="Path to nnUNet breast seg model dir (Dataset932 4ch). If set, generates and applies breast mask."
+    )
     args = parser.parse_args()
 
     image_dir = Path(args.image_dir)
@@ -596,6 +642,7 @@ def main():
         global_stats_path=args.global_stats_path,
         skip_ambiguous_shapes=args.skip_ambiguous_shapes,
         target_size=args.target_size,
+        breast_mask_model=args.breast_mask_model,
     )
 
     logger.info("Starting preprocessing pipeline...")
