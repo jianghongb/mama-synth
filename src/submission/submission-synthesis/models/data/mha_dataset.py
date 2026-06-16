@@ -123,7 +123,7 @@ class MhaDataset(BaseDataset):
             bm_arr = sitk.GetArrayFromImage(
                 sitk.ReadImage(os.path.join(self.dir_breast_mask, fname))
             ).astype(np.float32)
-            bm_arr = (bm_arr > 0).astype(np.float32)
+            bm_arr = (bm_arr.squeeze() > 0).astype(np.float32)
             breast_mask_t = torch.from_numpy(bm_arr).unsqueeze(0)
             if self.fixed_size:
                 s = self.target_size
