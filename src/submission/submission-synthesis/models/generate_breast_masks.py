@@ -1,7 +1,11 @@
-"""Batch-generate breast masks for training data using Dataset910_BreastSegNet."""
+"""Batch-generate breast masks using nnUNet segmentation models.
+
+Supports:
+  - Dataset910 (1-channel T1 input, 10-class output)
+  - Dataset932 (4-channel kinetic input: P0, P1, d_early, d_late)
+"""
 import argparse
 import os
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -15,14 +19,20 @@ os.environ.setdefault("nnUNet_results", "/tmp/nnunet_results")
 
 from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
 
-BREAST_LABELS = {1, 2, 5, 6, 9}
+# Dataset910: labels that are "breast" (tissue, vessel, lesion, lymphnode, implant)
+BREAST_LABELS_910 = {1, 2, 5, 6, 9}
+# Dataset932: labels 1=breast, 2=FGT, 3=tumor → all are breast region
+BREAST_LABELS_932 = {1, 2, 3}
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input_dir", required=True)
+    parser.add_argument("--input_dir", required=True, help="pre-contrast MHA dir")
+    parser.add_argument("--gt_dir", default="", help="ground_truth (subtraction) dir, required for 4ch model")
     parser.add_argument("--output_dir", required=True)
     parser.add_argument("--model_dir", required=True)
+    parser.add_argument("--model_type", choices=["910", "932"], default="910",
+                        help="910=single-channel T1, 932=4-channel kinetic")
     parser.add_argument("--fold", type=int, default=0)
     args = parser.parse_args()
 
@@ -30,8 +40,12 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    if args.model_type == "932" and not args.gt_dir:
+        parser.error("--gt_dir required for 4-channel model (932)")
+    gt_dir = Path(args.gt_dir) if args.gt_dir else None
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Device: {device}")
+    print(f"Device: {device}, Model type: Dataset{args.model_type}")
 
     predictor = nnUNetPredictor(
         tile_step_size=0.5,
@@ -58,6 +72,7 @@ def main():
         'spacing': [1.0, 1.0, 1.0],
     }
 
+    breast_labels = BREAST_LABELS_932 if args.model_type == "932" else BREAST_LABELS_910
     mha_files = sorted(input_dir.glob("*.mha"))
     print(f"Processing {len(mha_files)} files...")
 
@@ -68,18 +83,34 @@ def main():
 
         img = sitk.ReadImage(str(f))
         arr = sitk.GetArrayFromImage(img).astype(np.float32)
-        sl = arr.squeeze()
+        sl = arr.squeeze()  # (H, W)
 
-        # Shape for nnUNet: (1, 1, H, W)
-        input_arr = sl[np.newaxis, np.newaxis, :, :]
+        if args.model_type == "932":
+            # 4-channel: P0, P1, d_early, d_late
+            gt_path = gt_dir / f.name
+            if not gt_path.exists():
+                continue
+            gt_arr = sitk.GetArrayFromImage(sitk.ReadImage(str(gt_path))).astype(np.float32).squeeze()
+
+            p0 = sl                    # pre-contrast
+            d_early = gt_arr           # subtraction (post - pre) = ground_truth
+            p1 = p0 + d_early          # reconstruct post = pre + subtraction
+            d_late = d_early            # approximate (only 1 phase available)
+
+            # Shape: (1, 4, 1, H, W) for 3D model with single slice
+            input_arr = np.stack([p0, p1, d_early, d_late])[np.newaxis, :, np.newaxis, :, :]
+        else:
+            # 1-channel: T1 only
+            input_arr = sl[np.newaxis, np.newaxis, np.newaxis, :, :]  # (1, 1, 1, H, W)
+
         pred = predictor.predict_single_npy_array(input_arr, props, None, None, False)
 
-        if pred.ndim == 3:
+        # Squeeze to 2D
+        while pred.ndim > 2:
             pred = pred[0]
 
-        breast_mask = np.isin(pred, list(BREAST_LABELS)).astype(np.int16)
+        breast_mask = np.isin(pred, list(breast_labels)).astype(np.int16)
 
-        # Save with same metadata
         if arr.ndim == 3:
             breast_mask = breast_mask[np.newaxis, ...]
         out_img = sitk.GetImageFromArray(breast_mask)
