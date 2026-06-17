@@ -9,8 +9,9 @@
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=hongjia@kth.se
 #
-# v12: v5 params (MSEC=50) + data_split_v5 (方案A masked data, ~1300 cases)
+# v12: v5 params (MSEC=50) + data_split_v5 (~1400 cases, includes yunnan)
 # Input/GT already have chest wall zeroed out via Dataset932 3D breast mask
+# Data: DUKE + ISPY1 + ISPY2 + NACT (motion excluded) + Yunnan
 # No --breast_mask_dir needed since data is pre-masked
 
 PROJ=/proj/berzbiomedicalimagingkth/users/x_honji
