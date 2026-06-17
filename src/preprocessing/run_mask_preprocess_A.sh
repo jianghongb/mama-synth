@@ -37,6 +37,7 @@ python ${PROJ}/mama-synth/src/preprocessing/mask_and_preprocess.py \
     --global_stats ${PROJ}/mama-synth/src/preprocessing/training_pre_stats.json \
     --breast_model_dir ${PROJ}/exp4x_for_maia/Dataset932/nnUNetTrainer__nnUNetPlans__3d_fullres \
     --skip_ambiguous_shapes \
+    --exclude_list ${PROJ}/mama-synth/src/preprocessing/motion_cases.txt \
     --start ${BATCH_START:-0} \
     --end ${BATCH_END:-1507} \
     --device cuda
