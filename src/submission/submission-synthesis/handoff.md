@@ -336,3 +336,45 @@ images/ + segmentations/
 2. 或在 CPU 上跑 Dataset910 breast mask → 方案B数据就绪
 3. 用完整数据训练 v12 (方案A) 或新版本 (方案B)
 4. 评估 → 选最佳 → 提交 GC
+
+---
+
+## 10. Axial-Only 训练发现 (v13/v14)
+
+### GC 官方确认: "validation and test data contains only axial cases"
+
+### 数据方向检查
+
+| 数据集 | 方向 | Axial? | 备注 |
+|--------|------|:---:|------|
+| DUKE | LAI | ✅ | 448×448, 512×512 |
+| ISPY2 | LAI | ✅ | 多种尺寸 |
+| LABREAST | Axial | ✅ | 448×448, 480×480 (论文确认 T1 fat-sat axial) |
+| YUNNAN | Axial | ✅ | 来自 axial DCE |
+| **ISPY1** | **PSL** | ❌ | **Sagittal**, 256×256×60 |
+| **NACT** | **PSL** | ❌ | **Sagittal**, 256×256×60 |
+| **AMBL** | **RAS (sagittal slice)** | ❌ | **512×112**, sagittal 切面 |
+
+### 影响
+
+Sagittal 数据混入训练会"污染"模型：
+- 模型需要同时学习 axial 和 sagittal 两种完全不同的解剖结构
+- GC 只测 axial → sagittal 训练数据是纯噪声，浪费模型容量
+
+### 版本对比
+
+| 版本 | 基础 | 去掉 | 剩余 cases |
+|------|------|------|-----------|
+| v12 | data_split_v5 (Dataset932 预处理) | ISPY1 + NACT | → v13: 1236 |
+| v11 | data_split_v4 (Dataset910 mask) | ISPY1 + NACT + AMBL | → v14: 2528 |
+
+### v13 配置
+- 数据: data_split_v5 去掉 ISPY1/NACT (DUKE + ISPY2 + YUNNAN = 1236 cases)
+- 预处理: Dataset932 3D mask (input 已去胸壁)
+- 无 breast_mask_dir, 无 intensity_aug
+
+### v14 配置
+- 数据: data_split_v4 去掉 ISPY1/NACT/AMBL (ISPY2 + DUKE + LABREAST + YUNNAN = 2528 cases)
+- Breast mask: ✅ (Dataset910 loss mask)
+- Intensity aug: ✅
+- 与 v11 相同超参，仅去掉 sagittal 数据
