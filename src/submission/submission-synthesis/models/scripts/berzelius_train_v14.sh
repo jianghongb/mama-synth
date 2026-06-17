@@ -10,9 +10,9 @@
 #SBATCH --mail-user=hongjia@kth.se
 #
 # v14: v11 (data_split_v4 + breast mask + intensity_aug) but AXIAL ONLY
-# Removed: ISPY1 (sagittal, 168 cases) + NACT (sagittal, 64 cases)
+# Removed: ISPY1 (sagittal, 168) + NACT (sagittal, 64) + AMBL (sagittal, 51)
 # GC validation/test only contains axial cases — sagittal data is noise
-# Remaining: ISPY2 + DUKE + LABREAST + YUNNAN + AMBL = 2579 cases (all axial)
+# Remaining: ISPY2 + DUKE + LABREAST + YUNNAN = 2528 cases (all axial)
 
 PROJ=/proj/berzbiomedicalimagingkth/users/x_honji
 
@@ -38,7 +38,7 @@ if [ ! -d "$FILTERED/input" ]; then
             for f in $src/*.mha; do
                 name=$(basename "$f")
                 case "$name" in
-                    ISPY1_*|NACT_*) continue ;;
+                    ISPY1_*|NACT_*|AMBL-*) continue ;;
                     *) ln -s "$f" "$FILTERED/$sub/$name" ;;
                 esac
             done
