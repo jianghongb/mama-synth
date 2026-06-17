@@ -46,6 +46,7 @@ data_split_v4 = DUKE + ISPY1 + ISPY2 + NACT + LA-Breast + Yunnan + AMBL (7 域)
 | v9 | data_split | 1074 | ✅ | ❌ | v5 + breast mask loss |
 | v10 | data_split_v4 | 2811 | ✅ | ❌ | v5 params + 最大数据 + breast mask |
 | v11 | data_split_v4 | 2811 | ✅ | ✅ | v10 + intensity augmentation |
+| v12 | data_split_v5 | ~1400 | 预处理去胸壁 | ❌ | Dataset932 3D mask 预处理, 无 runtime mask |
 
 ### 评估结果: data_split_v2/test (150 cases)
 
@@ -59,17 +60,21 @@ data_split_v4 = DUKE + ISPY1 + ISPY2 + NACT + LA-Breast + Yunnan + AMBL (7 域)
 | Dice ↑ | 0.684 | 0.492 | 0.437 | **0.708** | 0.680 |
 | HD95 ↓ | 55.6 | 105.8 | 115.8 | **37.7** | 54.1 |
 
-### 评估结果: data_split/test (272 clean cases, 无 motion) — v5 vs v9
+### 评估结果: data_split/test (272 clean cases, 无 motion) — 全版本对比
 
-| Metric | v5 | v9 | 改善 |
-|--------|:-:|:-:|------|
-| MSE ↓ | 0.618 | **0.270** | -56% |
-| LPIPS ↓ | 0.148 | **0.118** | -20% |
-| SSIM_tumor ↑ | 0.361 | **0.599** | +66% |
-| FRD ↓ | 10.75 | **9.54** | -11% |
-| AUROC ↑ | **0.867** | 0.837 | -3% |
-| Dice ↑ | 0.388 | **0.561** | +45% |
-| HD95 ↓ | 186.7 | **115.4** | -38% |
+| Metric | v5 | v9 | v11 | v12 | Best |
+|--------|:-:|:-:|:-:|:-:|------|
+| MSE ↓ | 0.618 | 0.270 | **0.246** | 1.017 | v11 |
+| LPIPS ↓ | 0.148 | **0.118** | 0.125 | 0.238 | v9 |
+| SSIM_tumor ↑ | 0.361 | **0.599** | 0.581 | 0.321 | v9 |
+| FRD ↓ | 10.75 | 9.54 | **9.41** | 10.32 | v11 |
+| AUROC ↑ | 0.867 | 0.837 | 0.828 | **0.891** | v12 |
+| Dice ↑ | 0.388 | 0.561 | **0.565** | 0.363 | v11 |
+| HD95 ↓ | 186.7 | 115.4 | **108.1** | 203.9 | v11 |
+
+**v12 分析**: 预处理去胸壁(input×mask)导致训练/推理不匹配（训练时 input 胸壁=0，推理时 input 有胸壁），
+造成严重 domain gap。AUROC 高是因为过度增强，但精度指标全面变差。
+**结论: v11 为最佳提交版本。**
 
 ### Yunnan 外部验证 (100 cases, 独立数据)
 
