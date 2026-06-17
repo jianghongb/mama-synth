@@ -134,6 +134,8 @@ def main():
     parser.add_argument("--device", default="auto", choices=["auto", "cuda", "mps", "cpu"])
     parser.add_argument("--exclude_list", default=None,
                         help="Text file with patient IDs to exclude (one per line)")
+    parser.add_argument("--start", type=int, default=0, help="Start index (for parallel batches)")
+    parser.add_argument("--end", type=int, default=None, help="End index (for parallel batches)")
     args = parser.parse_args()
 
     # Load exclusion list
@@ -167,6 +169,10 @@ def main():
     if exclude_ids:
         patients = [p for p in patients if p.name not in exclude_ids]
         logger.info(f"After exclusion: {len(patients)} patients")
+
+    # Slice for parallel execution
+    patients = patients[args.start:args.end]
+    logger.info(f"Processing batch [{args.start}:{args.end}] → {len(patients)} patients")
 
     for patient_dir in patients:
         patient_id = patient_dir.name
