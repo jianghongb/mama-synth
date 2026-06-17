@@ -170,6 +170,9 @@ def main():
 
     for patient_dir in patients:
         patient_id = patient_dir.name
+        # Skip if already processed
+        if (mha_input_dir / f"{patient_id}.mha").exists():
+            continue
         try:
             # --- Load phases ---
             phase_files = sorted(
