@@ -525,9 +525,17 @@ class Preprocessor:
                 if self.breast_mask_dir:
                     try:
                         bm_path = self.breast_mask_dir / f"{patient_id}.nii.gz"
+                        if not bm_path.exists():
+                            bm_path = self.breast_mask_dir / f"{patient_id}.mha"
                         if bm_path.exists():
-                            bm_3d = nib.load(str(bm_path)).get_fdata().astype(np.float32)
-                            breast_mask_2d = self.extract_slice(bm_3d, largest_slice, slice_axis)
+                            if str(bm_path).endswith('.mha'):
+                                import SimpleITK as _sitk
+                                bm_data = _sitk.GetArrayFromImage(_sitk.ReadImage(str(bm_path))).astype(np.float32)
+                                # 2D mha: squeeze and use directly
+                                breast_mask_2d = bm_data.squeeze()
+                            else:
+                                bm_3d = nib.load(str(bm_path)).get_fdata().astype(np.float32)
+                                breast_mask_2d = self.extract_slice(bm_3d, largest_slice, slice_axis)
                             breast_mask_2d = np.rot90(breast_mask_2d, k=1)
                             if self.target_size is not None:
                                 from PIL import Image as _PILImage
