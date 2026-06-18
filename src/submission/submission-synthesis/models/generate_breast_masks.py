@@ -34,6 +34,7 @@ def main():
     parser.add_argument("--model_type", choices=["910", "932"], default="910",
                         help="910=single-channel T1, 932=4-channel kinetic")
     parser.add_argument("--fold", type=int, default=0)
+    parser.add_argument("--checkpoint", type=str, default="checkpoint_final.pth")
     args = parser.parse_args()
 
     input_dir = Path(args.input_dir)
@@ -59,7 +60,7 @@ def main():
     predictor.initialize_from_trained_model_folder(
         args.model_dir,
         use_folds=(args.fold,),
-        checkpoint_name="checkpoint_final.pth",
+        checkpoint_name=args.checkpoint,
     )
     print("Model loaded.")
 
