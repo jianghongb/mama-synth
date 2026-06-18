@@ -10,10 +10,10 @@ class Pix2PixHDModel(BaseModel):
     def name(self):
         return 'Pix2PixHDModel'
     
-    def init_loss_filter(self, use_gan_feat_loss, use_vgg_loss, use_tumor_loss=False, use_ssim_loss=False, use_mssc_loss=False):
-        flags = (True, use_gan_feat_loss, use_vgg_loss, True, True, use_tumor_loss, use_ssim_loss, use_mssc_loss)
-        def loss_filter(g_gan, g_gan_feat, g_vgg, d_real, d_fake, g_tumor, g_ssim, g_mssc):
-            return [l for (l,f) in zip((g_gan,g_gan_feat,g_vgg,d_real,d_fake,g_tumor,g_ssim,g_mssc),flags) if f]
+    def init_loss_filter(self, use_gan_feat_loss, use_vgg_loss, use_tumor_loss=False, use_ssim_loss=False, use_mssc_loss=False, use_edge_loss=False):
+        flags = (True, use_gan_feat_loss, use_vgg_loss, True, True, use_tumor_loss, use_ssim_loss, use_mssc_loss, use_edge_loss)
+        def loss_filter(g_gan, g_gan_feat, g_vgg, d_real, d_fake, g_tumor, g_ssim, g_mssc, g_edge):
+            return [l for (l,f) in zip((g_gan,g_gan_feat,g_vgg,d_real,d_fake,g_tumor,g_ssim,g_mssc,g_edge),flags) if f]
         return loss_filter
     
     def initialize(self, opt):
@@ -78,7 +78,9 @@ class Pix2PixHDModel(BaseModel):
             self.lambda_mssc = getattr(opt, 'lambda_mssc', 0)
             self.use_ssim_loss = self.lambda_ssim > 0
             self.use_mssc_loss = self.lambda_mssc > 0
-            self.loss_filter = self.init_loss_filter(not opt.no_ganFeat_loss, not opt.no_vgg_loss, self.use_tumor_loss, self.use_ssim_loss, self.use_mssc_loss)
+            self.lambda_edge = getattr(opt, 'lambda_edge', 0)
+            self.use_edge_loss = self.lambda_edge > 0
+            self.loss_filter = self.init_loss_filter(not opt.no_ganFeat_loss, not opt.no_vgg_loss, self.use_tumor_loss, self.use_ssim_loss, self.use_mssc_loss, self.use_edge_loss)
             
             self.criterionGAN = networks.GANLoss(use_lsgan=not opt.no_lsgan, tensor=self.Tensor)   
             self.criterionFeat = torch.nn.L1Loss()
@@ -89,7 +91,7 @@ class Pix2PixHDModel(BaseModel):
                 
         
             # Names so we can breakout loss
-            self.loss_names = self.loss_filter('G_GAN','G_GAN_Feat','G_VGG','D_real', 'D_fake', 'G_Tumor', 'G_SSIM', 'G_MSSC')
+            self.loss_names = self.loss_filter('G_GAN','G_GAN_Feat','G_VGG','D_real', 'D_fake', 'G_Tumor', 'G_SSIM', 'G_MSSC', 'G_Edge')
 
             # initialize optimizers
             # optimizer G
@@ -235,9 +237,23 @@ class Pix2PixHDModel(BaseModel):
         loss_G_MSSC = 0
         if self.use_mssc_loss:
             loss_G_MSSC = self.criterionMSSC(fake_image, real_image, input_label) * self.lambda_mssc
+
+        # Edge loss: enforce sharp boundaries (Sobel-based)
+        loss_G_Edge = 0
+        if self.use_edge_loss:
+            # Sobel filters for edge detection
+            sobel_x = torch.tensor([[-1,0,1],[-2,0,2],[-1,0,1]], dtype=fake_image.dtype, device=fake_image.device).view(1,1,3,3)
+            sobel_y = torch.tensor([[-1,-2,-1],[0,0,0],[1,2,1]], dtype=fake_image.dtype, device=fake_image.device).view(1,1,3,3)
+            fake_edge_x = torch.nn.functional.conv2d(fake_masked, sobel_x, padding=1)
+            fake_edge_y = torch.nn.functional.conv2d(fake_masked, sobel_y, padding=1)
+            real_edge_x = torch.nn.functional.conv2d(real_masked, sobel_x, padding=1)
+            real_edge_y = torch.nn.functional.conv2d(real_masked, sobel_y, padding=1)
+            fake_edge = torch.sqrt(fake_edge_x**2 + fake_edge_y**2 + 1e-6)
+            real_edge = torch.sqrt(real_edge_x**2 + real_edge_y**2 + 1e-6)
+            loss_G_Edge = torch.nn.functional.l1_loss(fake_edge, real_edge) * self.lambda_edge
         
         # Only return the fake_B image if necessary to save BW
-        return [ self.loss_filter( loss_G_GAN, loss_G_GAN_Feat, loss_G_VGG, loss_D_real, loss_D_fake, loss_G_Tumor, loss_G_SSIM, loss_G_MSSC ), None if not infer else fake_image ]
+        return [ self.loss_filter( loss_G_GAN, loss_G_GAN_Feat, loss_G_VGG, loss_D_real, loss_D_fake, loss_G_Tumor, loss_G_SSIM, loss_G_MSSC, loss_G_Edge ), None if not infer else fake_image ]
 
     def inference(self, label, inst, image=None):
         # Encode Inputs        

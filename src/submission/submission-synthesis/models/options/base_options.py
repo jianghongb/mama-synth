@@ -69,6 +69,7 @@ class BaseOptions():
         self.parser.add_argument('--lambda_gan', type=float, default=1.0, help='weight for GAN loss')
         self.parser.add_argument('--lambda_mssc', type=float, default=0, help='weight for Multi-Scale Subtraction Consistency loss (0 = disabled)')
         self.parser.add_argument('--lambda_mssc_grad', type=float, default=0, help='weight for Sobel gradient consistency within MSSC (0 = disabled)')
+        self.parser.add_argument('--lambda_edge', type=float, default=0, help='weight for edge (Sobel) loss (0 = disabled)')
         self.parser.add_argument('--stats_file', type=str, default=None, help='path to training_pre_stats.json for z-score→raw conversion')
         self.parser.add_argument('--mssc_levels', type=int, default=3, help='number of Laplacian pyramid levels for MSSC')
         self.parser.add_argument('--square_only', action='store_true', help='only use square (axial) images for training')
