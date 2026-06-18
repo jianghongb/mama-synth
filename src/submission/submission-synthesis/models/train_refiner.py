@@ -125,6 +125,8 @@ def main():
         max_dataset_size = float('inf')
         breast_mask_dir = ''
         intensity_aug = False
+        n_downsample_global = 4
+        square_only = False
 
     opt = SimpleOpt()
     dataset = MhaDataset()
