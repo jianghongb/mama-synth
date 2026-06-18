@@ -48,7 +48,8 @@ data_split_v4 = DUKE + ISPY1 + ISPY2 + NACT + LA-Breast + Yunnan + AMBL (7 域)
 | v11 | data_split_v4 | 2811 | ✅ | ✅ | v10 + intensity augmentation |
 | v12 | data_split_v5 | ~1400 | 预处理去胸壁 | ❌ | Dataset932 3D mask 预处理, 无 runtime mask |
 | v13 | data_split_v5 | ~1236 | 预处理去胸壁 | ❌ | v12 去掉 ISPY1/NACT (axial only) |
-| v14 | data_split_v4 | 2528 | ✅ loss mask | ✅ | v11 去掉 sagittal (axial only) ⏳ |
+| **v14** | **data_split_v4 axial** | **2528** | **✅ ResEncUNetL f0** | **✅** | **v11 去掉 sagittal → 🏆 最佳** |
+| v16 | data_split_v4 axial | 2528 | ✅ ensemble (ResEnc+Plain OR) | ✅ | v14 + ensemble mask, 50 epochs only |
 
 ### 评估结果: data_split_v2/test (150 cases)
 
