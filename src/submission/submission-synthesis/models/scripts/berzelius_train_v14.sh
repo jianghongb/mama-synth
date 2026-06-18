@@ -55,6 +55,7 @@ python train.py \
   --dataset_mode mha \
   --dataroot $PROJ/data_split_v4_axial/train \
   --checkpoints_dir $PROJ/checkpoints \
+  --continue_train \
   --label_nc 0 \
   --input_nc 1 \
   --output_nc 1 \
