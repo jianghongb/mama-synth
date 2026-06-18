@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """MAMA-SYNTH Grand Challenge – Docker inference entry point.
 
-Pipeline:
-  1. Load pre-contrast input
-  2. Resize to 512×512
-  3. Pix2PixHD synthesis (residual mode: output = input + Δ)
-  4. Resize back to original resolution
-  5. Write output preserving spatial metadata
+Two-stage pipeline:
+  Stage 1: Pix2PixHD GAN → coarse synthesis (~1s)
+  Stage 2 (optional): SDEdit diffusion refinement → sharper tumor boundaries (~5-8s)
+
+If refiner weights are not found, falls back to GAN-only (backward compatible).
 
 Grand Challenge I/O contract:
   Input:  /input/images/pre-contrast-dce-mri-slice-breast/<uuid>.mha
@@ -27,8 +26,13 @@ INPUT_PATH = Path(os.environ.get("MAMA_INPUT_DIR", "/input"))
 OUTPUT_PATH = Path(os.environ.get("MAMA_OUTPUT_DIR", "/output"))
 INPUT_SLUG = "pre-contrast-dce-mri-slice-breast"
 OUTPUT_SLUG = "synthetic-contrast-dce-mri-slice-breast"
-WEIGHTS_PATH = os.environ.get("WEIGHTS_PATH", "/opt/app/weights/latest_net_G.pth")
+WEIGHTS_PATH = os.environ.get("MAMA_WEIGHTS_PATH", "/opt/app/weights/latest_net_G.pth")
+REFINER_PATH = os.environ.get("MAMA_REFINER_PATH", "/opt/app/weights/refiner_latest.pth")
 MODEL_SIZE = 512
+
+# SDEdit parameters
+SDEDIT_STRENGTH = float(os.environ.get("MAMA_SDEDIT_STRENGTH", "0.3"))
+DDIM_STEPS = int(os.environ.get("MAMA_DDIM_STEPS", "20"))
 
 
 def build_generator(device):
@@ -45,6 +49,77 @@ def build_generator(device):
     return netG
 
 
+def build_refiner(device):
+    """Load refiner if weights exist, otherwise return None."""
+    if not Path(REFINER_PATH).exists():
+        return None
+    from models.refiner_network import RefinerUNet
+    refiner = RefinerUNet(in_ch=3, out_ch=1, base_ch=64, ch_mult=(1, 2, 4, 4))
+    refiner.load_state_dict(torch.load(REFINER_PATH, map_location=device))
+    refiner.to(device).eval()
+    print(f"Refiner loaded from {REFINER_PATH}")
+    return refiner
+
+
+def cosine_alpha_bar(T, s=0.008):
+    """Precompute ᾱ schedule."""
+    steps = torch.arange(T + 1, dtype=torch.float64)
+    alpha_bar = torch.cos(((steps / T) + s) / (1 + s) * (np.pi / 2)) ** 2
+    alpha_bar = alpha_bar / alpha_bar[0]
+    return alpha_bar.float()
+
+
+@torch.no_grad()
+def sdedit_refine(refiner, gan_output, pre, device, strength=0.3, num_steps=20, T=1000):
+    """SDEdit: add noise to GAN output, then denoise with DDIM.
+
+    Args:
+        refiner: RefinerUNet model
+        gan_output: (1, 1, H, W) GAN synthesis result
+        pre: (1, 1, H, W) pre-contrast input
+        strength: fraction of noise schedule to use (0.3 = start from t=300)
+        num_steps: DDIM sampling steps
+    """
+    alpha_bar = cosine_alpha_bar(T).to(device)
+
+    # Determine starting timestep
+    t_start = int(T * strength)
+    if t_start == 0:
+        return gan_output
+
+    # Add noise to GAN output at t_start
+    ab = alpha_bar[t_start]
+    noise = torch.randn_like(gan_output)
+    x_t = torch.sqrt(ab) * gan_output + torch.sqrt(1 - ab) * noise
+
+    # DDIM sampling from t_start → 0
+    timesteps = torch.linspace(t_start, 0, num_steps + 1).long().to(device)
+
+    for i in range(num_steps):
+        t_cur = timesteps[i]
+        t_next = timesteps[i + 1]
+
+        # Predict noise
+        t_batch = t_cur.unsqueeze(0)
+        refiner_input = torch.cat([x_t, pre, gan_output], dim=1)
+        eps_pred = refiner(refiner_input, t_batch)
+
+        # DDIM deterministic update
+        ab_cur = alpha_bar[t_cur]
+        ab_next = alpha_bar[t_next] if t_next > 0 else torch.tensor(1.0, device=device)
+
+        # Predict x0
+        x0_pred = (x_t - torch.sqrt(1 - ab_cur) * eps_pred) / torch.sqrt(ab_cur)
+
+        # Step to t_next
+        if t_next > 0:
+            x_t = torch.sqrt(ab_next) * x0_pred + torch.sqrt(1 - ab_next) * eps_pred
+        else:
+            x_t = x0_pred
+
+    return x_t
+
+
 def find_input_image() -> Path:
     search_dir = INPUT_PATH / "images" / INPUT_SLUG
     candidates = list(search_dir.glob("*.mha"))
@@ -55,31 +130,42 @@ def find_input_image() -> Path:
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Load models
     netG = build_generator(device)
+    refiner = build_refiner(device)
 
     input_file = find_input_image()
     print(f"Input: {input_file}")
 
     img = sitk.ReadImage(str(input_file))
     arr = sitk.GetArrayFromImage(img).astype(np.float32)
-
     sl = arr.squeeze()
     orig_h, orig_w = sl.shape
 
     # Resize to 512×512
-    t_input = torch.from_numpy(sl).unsqueeze(0).unsqueeze(0)
+    t = torch.from_numpy(sl).unsqueeze(0).unsqueeze(0).to(device)
     if orig_h != MODEL_SIZE or orig_w != MODEL_SIZE:
-        t_input = torch.nn.functional.interpolate(t_input, size=(MODEL_SIZE, MODEL_SIZE), mode='bilinear', align_corners=False)
+        t = torch.nn.functional.interpolate(t, size=(MODEL_SIZE, MODEL_SIZE), mode='bilinear', align_corners=False)
+    pre_512 = t
 
-    # Pix2PixHD inference
+    # Stage 1: Pix2PixHD
     with torch.no_grad():
-        out = netG(t_input.to(device))
+        gan_out = netG(pre_512)
+
+    # Stage 2: SDEdit refinement (if refiner available)
+    if refiner is not None:
+        result_512 = sdedit_refine(refiner, gan_out, pre_512, device,
+                                   strength=SDEDIT_STRENGTH, num_steps=DDIM_STEPS)
+    else:
+        result_512 = gan_out
 
     # Resize back
     if orig_h != MODEL_SIZE or orig_w != MODEL_SIZE:
-        out = torch.nn.functional.interpolate(out, size=(orig_h, orig_w), mode='bilinear', align_corners=False)
+        result_512 = torch.nn.functional.interpolate(result_512, size=(orig_h, orig_w),
+                                                     mode='bilinear', align_corners=False)
 
-    result = out[0, 0].cpu().numpy().astype(np.float32)
+    result = result_512[0, 0].cpu().numpy().astype(np.float32)
 
     # Restore original ndim
     if arr.ndim == 3:
@@ -93,7 +179,7 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / "output.mha"
     sitk.WriteImage(out_img, str(out_file))
-    print(f"Output: {out_file}  shape={result.shape}")
+    print(f"Output: {out_file}  shape={result.shape}  refiner={'ON' if refiner else 'OFF'}")
 
 
 if __name__ == "__main__":

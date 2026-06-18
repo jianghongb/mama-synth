@@ -1,0 +1,184 @@
+"""
+train_refiner.py — Stage 2: Train diffusion denoiser on top of frozen GAN.
+
+Pipeline:
+  1. Load frozen Pix2PixHD generator (Stage 1)
+  2. For each training pair (pre, gt):
+     a. Generate GAN output: gan_out = GAN(pre)
+     b. Sample random timestep t, add noise to gt: noisy = √ᾱt·gt + √(1-ᾱt)·ε
+     c. Predict noise: ε̂ = RefinerUNet([noisy, pre, gan_out], t)
+     d. Loss = MSE(ε̂, ε)
+
+Usage:
+    python train_refiner.py \
+        --dataroot /path/to/data_split_v4/train \
+        --gan_weights /path/to/latest_net_G.pth \
+        --checkpoints_dir /path/to/checkpoints \
+        --name refiner_v1 \
+        --epochs 100 \
+        --lr 1e-4 \
+        --batch_size 4 \
+        --T 1000 \
+        --gpu_ids 0
+"""
+import argparse
+import os
+import sys
+from pathlib import Path
+
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+from functools import partial
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from refiner_network import RefinerUNet
+from networks import GlobalGenerator
+from data.mha_dataset import MhaDataset
+
+
+def build_gan(weights_path, device):
+    """Load frozen Pix2PixHD generator."""
+    norm_layer = partial(nn.InstanceNorm2d, affine=False)
+    netG = GlobalGenerator(
+        input_nc=1, output_nc=1, ngf=64,
+        n_downsampling=4, n_blocks=9,
+        norm_layer=norm_layer, residual_mode=True,
+    )
+    netG.load_state_dict(torch.load(weights_path, map_location=device))
+    netG.to(device).eval()
+    for p in netG.parameters():
+        p.requires_grad = False
+    return netG
+
+
+def cosine_beta_schedule(T, s=0.008):
+    """Cosine noise schedule (improved DDPM)."""
+    steps = torch.arange(T + 1, dtype=torch.float64)
+    alpha_bar = torch.cos(((steps / T) + s) / (1 + s) * (np.pi / 2)) ** 2
+    alpha_bar = alpha_bar / alpha_bar[0]
+    betas = 1 - (alpha_bar[1:] / alpha_bar[:-1])
+    return torch.clamp(betas, 0.0001, 0.999).float()
+
+
+class DiffusionSchedule:
+    def __init__(self, T=1000, device='cpu'):
+        self.T = T
+        betas = cosine_beta_schedule(T)
+        alphas = 1.0 - betas
+        self.alpha_bar = torch.cumprod(alphas, dim=0).to(device)
+
+    def q_sample(self, x0, t, noise=None):
+        """Forward diffusion: add noise at timestep t."""
+        if noise is None:
+            noise = torch.randn_like(x0)
+        ab = self.alpha_bar[t][:, None, None, None]
+        return torch.sqrt(ab) * x0 + torch.sqrt(1 - ab) * noise, noise
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dataroot", required=True)
+    parser.add_argument("--gan_weights", required=True)
+    parser.add_argument("--checkpoints_dir", default="./checkpoints")
+    parser.add_argument("--name", default="refiner_v1")
+    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--batch_size", type=int, default=4)
+    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--T", type=int, default=1000, help="Diffusion timesteps")
+    parser.add_argument("--gpu_ids", type=str, default="0")
+    parser.add_argument("--save_freq", type=int, default=10)
+    parser.add_argument("--image_size", type=int, default=512)
+    args = parser.parse_args()
+
+    device = torch.device(f"cuda:{args.gpu_ids}" if torch.cuda.is_available() else "cpu")
+
+    # Directories
+    ckpt_dir = Path(args.checkpoints_dir) / args.name
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+
+    # Models
+    gan = build_gan(args.gan_weights, device)
+    refiner = RefinerUNet(in_ch=3, out_ch=1, base_ch=64, ch_mult=(1, 2, 4, 4)).to(device)
+    print(f"Refiner params: {sum(p.numel() for p in refiner.parameters()) / 1e6:.1f}M")
+
+    schedule = DiffusionSchedule(T=args.T, device=device)
+    optimizer = torch.optim.AdamW(refiner.parameters(), lr=args.lr, weight_decay=1e-4)
+
+    # Dataset — reuse existing MhaDataset
+    # MhaDataset returns dict with 'label' (pre), 'image' (gt), 'mask', etc.
+    class SimpleOpt:
+        dataroot = args.dataroot
+        loadSize = args.image_size
+        fineSize = args.image_size
+        resize_or_crop = 'resize'
+        isTrain = True
+        no_flip = True
+        label_nc = 0
+        input_nc = 1
+        output_nc = 1
+        no_instance = True
+        batchSize = args.batch_size
+        max_dataset_size = float('inf')
+        breast_mask_dir = ''
+        intensity_aug = False
+
+    opt = SimpleOpt()
+    dataset = MhaDataset()
+    dataset.initialize(opt)
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True,
+                            num_workers=4, pin_memory=True, drop_last=True)
+
+    print(f"Dataset: {len(dataset)} images, {len(dataloader)} batches/epoch")
+
+    # Training loop
+    for epoch in range(1, args.epochs + 1):
+        refiner.train()
+        losses = []
+
+        for batch in tqdm(dataloader, desc=f"Epoch {epoch}/{args.epochs}"):
+            pre = batch['label'].to(device)   # (B, 1, H, W)
+            gt = batch['image'].to(device)    # (B, 1, H, W)
+
+            # Generate GAN output (frozen)
+            with torch.no_grad():
+                gan_out = gan(pre)
+
+            # Sample random timesteps
+            t = torch.randint(0, args.T, (pre.shape[0],), device=device)
+
+            # Forward diffusion on GT
+            noisy_gt, noise = schedule.q_sample(gt, t)
+
+            # Refiner input: [noisy_gt, pre, gan_out]
+            refiner_input = torch.cat([noisy_gt, pre, gan_out], dim=1)
+
+            # Predict noise
+            noise_pred = refiner(refiner_input, t)
+
+            # Simple MSE loss on noise prediction
+            loss = F.mse_loss(noise_pred, noise)
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            losses.append(loss.item())
+
+        avg_loss = np.mean(losses)
+        print(f"Epoch {epoch}: loss={avg_loss:.6f}")
+
+        # Save checkpoint
+        if epoch % args.save_freq == 0:
+            torch.save(refiner.state_dict(), ckpt_dir / f"refiner_epoch{epoch}.pth")
+            torch.save(refiner.state_dict(), ckpt_dir / "refiner_latest.pth")
+            print(f"  Saved checkpoint → {ckpt_dir}")
+
+    torch.save(refiner.state_dict(), ckpt_dir / "refiner_latest.pth")
+    print("Training complete.")
+
+
+if __name__ == "__main__":
+    main()
