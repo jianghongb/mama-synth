@@ -2,7 +2,7 @@
 #SBATCH -A berzelius-2025-422
 #SBATCH -p berzelius
 #SBATCH --gpus=1
-#SBATCH -t 24:00:00
+#SBATCH -t 48:00:00
 #SBATCH -J mamasynth_v13
 #SBATCH -o /proj/berzbiomedicalimagingkth/users/x_honji/train_%j.log
 #SBATCH -e /proj/berzbiomedicalimagingkth/users/x_honji/train_%j.err
@@ -53,6 +53,7 @@ python train.py \
   --dataset_mode mha \
   --dataroot $PROJ/data_split_v5_no_ispy1_nact/train \
   --checkpoints_dir $PROJ/checkpoints \
+  --continue_train \
   --label_nc 0 --input_nc 1 --output_nc 1 \
   --no_instance --residual_mode \
   --resize_or_crop resize --loadSize 512 --fineSize 512 \
