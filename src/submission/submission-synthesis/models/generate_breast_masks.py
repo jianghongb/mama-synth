@@ -109,7 +109,18 @@ def main():
         while pred.ndim > 2:
             pred = pred[0]
 
-        breast_mask = np.isin(pred, list(breast_labels)).astype(np.int16)
+        breast_mask = np.isin(pred, list(breast_labels)).astype(np.uint8)
+
+        # Morphological post-processing: connect disconnected breast regions
+        import cv2
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+        breast_mask = cv2.morphologyEx(breast_mask, cv2.MORPH_CLOSE, kernel)
+        # Fill internal holes
+        h, w = breast_mask.shape
+        flood = np.zeros((h+2, w+2), np.uint8)
+        mask_inv = breast_mask.copy()
+        cv2.floodFill(mask_inv, flood, (0, 0), 1)
+        breast_mask = (breast_mask | (1 - mask_inv)).astype(np.int16)
 
         if arr.ndim == 3:
             breast_mask = breast_mask[np.newaxis, ...]
