@@ -39,10 +39,18 @@
 | 数据扩展 | v6 | +motion data | ❌ 退化（motion 噪声） |
 | Breast mask | v7, v9 | Loss masking | ✅ 外部泛化大幅提升 |
 | Augmentation | v8 | Intensity aug | ✅ 全面提升 |
-| 多域+全组合 | v11 | 2811 cases + mask + aug | ✅ **综合最优** |
+| 多域+全组合 | v11 | 2811 cases + mask + aug | ✅ 综合优秀 |
 | 预处理去胸壁 | v12 | Dataset932 3D mask (全部数据) | ❌ 推理不匹配 |
-| Axial+3D mask | **v13** | v12 去掉 ISPY1/NACT (1236 axial cases, Dataset932 预处理) | ⏳ 训练中 |
-| Axial+loss mask | **v14** | v11 去掉 sagittal (2528 axial cases, Dataset910 loss mask + aug) | ⏳ 训练中 |
+| Axial+3D mask | v13 | v12 去掉 ISPY1/NACT (1236 axial cases) | ❌ 同上 |
+| **Axial+loss mask** | **v14** | **v11 去掉 sagittal (2528 axial, mask+aug)** | **🏆 最佳 (Dice 0.703, HD95 68.9)** |
+| Ensemble mask | v16 | v14 + ensemble breast mask (50 epochs) | 欠训练，潜力待验证 |
+
+## 最终推理方案
+
+v14 推理**不使用 breast mask**：训练时 loss mask 已让模型学会不增强胸壁。
+- 输入：z-score float32 MHA → resize 512 → Pix2PixHD → resize back → 输出
+- 无需 nnUNet、无需后处理、无需 mask 合并
+- Docker 容器只需 Generator 权重 (696 MB)
 
 ## v13 vs v14 Ablation
 
@@ -52,6 +60,7 @@
 | Intensity aug | ❌ | ✅ |
 | 数据量 | 1236 | 2528 |
 | 额外域 | 无 LABREAST | 含 LABREAST |
+| 结果 | ❌ domain gap | **🏆 Dice 0.703, HD95 68.9** |
 
 如果 v13 < v14，进一步证明 "loss masking + 更多数据 > 预处理去胸壁 + 少数据"。
 如果 v13 > v14，说明 Dataset932 的高精度 mask 能弥补数据量劣势。
@@ -74,16 +83,16 @@
 3. 系统性的多域数据整合框架（7 个异质数据源的质量控制流程）
 4. Axial-only 训练策略的必要性验证
 
-## 关键数值结果 (272 clean axial cases)
+## 关键数值结果 (199 axial cases, 无 sagittal)
 
-| Metric | v5 (baseline) | v9 (mask) | v11 (best) | v12 (pre-mask) |
+| Metric | v5 (baseline) | v9 (mask) | v11 (multi-domain) | v14 (axial-only) 🏆 |
 |--------|:-:|:-:|:-:|:-:|
-| MSE ↓ | 0.618 | 0.270 | **0.246** | 1.017 |
-| LPIPS ↓ | 0.148 | **0.118** | 0.125 | 0.238 |
-| SSIM_tumor ↑ | 0.361 | **0.599** | 0.581 | 0.321 |
-| FRD ↓ | 10.75 | 9.54 | **9.41** | 10.32 |
-| Dice ↑ | 0.388 | 0.561 | **0.565** | 0.363 |
-| HD95 ↓ | 186.7 | 115.4 | **108.1** | 203.9 |
+| MSE ↓ | 0.618 | 0.270 | 0.246 | **0.212** |
+| LPIPS ↓ | 0.148 | **0.118** | 0.125 | 0.126 |
+| SSIM_tumor ↑ | 0.361 | 0.599 | 0.581 | **0.689** |
+| FRD ↓ | 10.75 | **9.54** | 9.41 | 11.90 |
+| Dice ↑ | 0.388 | 0.561 | 0.565 | **0.703** |
+| HD95 ↓ | 186.7 | 115.4 | 108.1 | **68.9** |
 
 ## 时间线
 
