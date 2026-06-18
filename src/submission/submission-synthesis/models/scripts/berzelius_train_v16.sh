@@ -51,7 +51,7 @@ if [ ! -d "$FILTERED/input" ]; then
 fi
 
 # Generate breast masks with ensemble (OR of two models)
-BREAST_MASK_DIR=$PROJ/data_split_v4_axial/train/mha/breast_mask_ensemble
+BREAST_MASK_DIR=$PROJ/data_split_v4_axial/train/mha/breast_mask
 if [ ! -d "$BREAST_MASK_DIR" ]; then
     echo "Generating ensemble breast masks..."
     # Model 1: ResEncUNetL fold_0 (checkpoint_best)
@@ -61,13 +61,13 @@ if [ ! -d "$BREAST_MASK_DIR" ]; then
         --model_dir $PROJ/weights/Dataset910_BreastSegNet/nnUNetTrainer__nnUNetResEncUNetLPlans__2d \
         --fold 0 \
         --checkpoint checkpoint_best.pth
-    # Model 2: PlainConvUNet fold_4 (checkpoint_final)
+    # Model 2: PlainConvUNet fold_4 (checkpoint_best)
     python $PROJ/mama-synth/src/submission/submission-synthesis/models/generate_breast_masks.py \
         --input_dir $FILTERED/input \
         --output_dir ${BREAST_MASK_DIR}_plain \
         --model_dir $PROJ/weights/breast_seg/nnUNetTrainer__nnUNetPlans__2d \
         --fold 4 \
-        --checkpoint checkpoint_final.pth
+        --checkpoint checkpoint_best.pth
     # Combine with OR
     mkdir -p $BREAST_MASK_DIR
     python -c "
