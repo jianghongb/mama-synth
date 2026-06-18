@@ -111,7 +111,7 @@ def main():
 
         breast_mask = np.isin(pred, list(breast_labels)).astype(np.uint8)
 
-        # Morphological post-processing: connect disconnected breast regions
+        # Morphological post-processing: fill small gaps within regions
         import cv2
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
         breast_mask = cv2.morphologyEx(breast_mask, cv2.MORPH_CLOSE, kernel)
