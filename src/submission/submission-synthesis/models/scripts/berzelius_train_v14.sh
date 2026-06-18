@@ -9,10 +9,8 @@
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=hongjia@kth.se
 #
-# v14: v11 (data_split_v4 + breast mask + intensity_aug) but AXIAL ONLY
-# Removed: ISPY1 (sagittal, 168) + NACT (sagittal, 64) + AMBL (sagittal, 51)
-# GC validation/test only contains axial cases — sagittal data is noise
-# Remaining: ISPY2 + DUKE + LABREAST + YUNNAN = 2528 cases (all axial)
+# v14: data_split_v4 (full 2811 cases) + breast mask + intensity_aug
+# All domains: DUKE + ISPY1 + ISPY2 + NACT + LA-Breast + Yunnan + AMBL
 
 PROJ=/proj/berzbiomedicalimagingkth/users/x_honji
 
@@ -28,34 +26,14 @@ conda activate $PROJ/envs/gan
 pip show torchmetrics > /dev/null 2>&1 || pip install torchmetrics
 pip show nnunetv2 > /dev/null 2>&1 || pip install nnunetv2 dynamic-network-architectures
 
-# Create filtered dataset (exclude ISPY1 and NACT)
-FILTERED=$PROJ/data_split_v4_axial/train/mha
-if [ ! -d "$FILTERED/input" ]; then
-    mkdir -p $FILTERED/input $FILTERED/ground_truth $FILTERED/mask $FILTERED/breast_mask
-    for sub in input ground_truth mask breast_mask; do
-        src=$PROJ/data_split_v4/train/mha/$sub
-        if [ -d "$src" ]; then
-            for f in $src/*.mha; do
-                name=$(basename "$f")
-                case "$name" in
-                    ISPY1_*|NACT_*|AMBL-*) continue ;;
-                    *) ln -s "$f" "$FILTERED/$sub/$name" ;;
-                esac
-            done
-        fi
-    done
-    echo "Filtered dataset (axial only): $(ls $FILTERED/input/ | wc -l) cases"
-fi
-
 cd $PROJ/mama-synth/src/submission/submission-synthesis/models
 
 python train.py \
   --name mamasynth_v14 \
   --model pix2pixHD \
   --dataset_mode mha \
-  --dataroot $PROJ/data_split_v4_axial/train \
+  --dataroot $PROJ/data_split_v4/train \
   --checkpoints_dir $PROJ/checkpoints \
-  --continue_train \
   --label_nc 0 \
   --input_nc 1 \
   --output_nc 1 \
@@ -82,7 +60,7 @@ python train.py \
   --lambda_vgg 10 \
   --num_D 2 \
   --n_layers_D 3 \
-  --breast_mask_dir $PROJ/data_split_v4_axial/train/mha/breast_mask \
+  --breast_mask_dir $PROJ/data_split_v4/train/mha/breast_mask \
   --save_epoch_freq 5 \
   --print_freq 100 \
   --gpu_ids 0
