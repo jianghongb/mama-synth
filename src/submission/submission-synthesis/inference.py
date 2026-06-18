@@ -8,10 +8,6 @@ Pipeline:
   4. Resize back to original resolution
   5. Write output preserving spatial metadata
 
-Note: No breast mask at inference time. The model was trained with breast-masked
-loss, so it has already learned to only enhance the breast region. Adding inference
-mask actually hurts MSE/SSIM/AUROC (see v11 ablation results).
-
 Grand Challenge I/O contract:
   Input:  /input/images/pre-contrast-dce-mri-slice-breast/<uuid>.mha
   Output: /output/images/synthetic-contrast-dce-mri-slice-breast/output.mha
@@ -31,7 +27,7 @@ INPUT_PATH = Path(os.environ.get("MAMA_INPUT_DIR", "/input"))
 OUTPUT_PATH = Path(os.environ.get("MAMA_OUTPUT_DIR", "/output"))
 INPUT_SLUG = "pre-contrast-dce-mri-slice-breast"
 OUTPUT_SLUG = "synthetic-contrast-dce-mri-slice-breast"
-WEIGHTS_PATH = os.environ.get("MAMA_WEIGHTS_PATH", "/opt/app/weights/latest_net_G.pth")
+WEIGHTS_PATH = os.environ.get("WEIGHTS_PATH", "/opt/app/weights/latest_net_G.pth")
 MODEL_SIZE = 512
 
 
@@ -66,17 +62,18 @@ def main():
 
     img = sitk.ReadImage(str(input_file))
     arr = sitk.GetArrayFromImage(img).astype(np.float32)
+
     sl = arr.squeeze()
     orig_h, orig_w = sl.shape
 
     # Resize to 512×512
-    t = torch.from_numpy(sl).unsqueeze(0).unsqueeze(0).to(device)
+    t_input = torch.from_numpy(sl).unsqueeze(0).unsqueeze(0)
     if orig_h != MODEL_SIZE or orig_w != MODEL_SIZE:
-        t = torch.nn.functional.interpolate(t, size=(MODEL_SIZE, MODEL_SIZE), mode='bilinear', align_corners=False)
+        t_input = torch.nn.functional.interpolate(t_input, size=(MODEL_SIZE, MODEL_SIZE), mode='bilinear', align_corners=False)
 
     # Pix2PixHD inference
     with torch.no_grad():
-        out = netG(t)
+        out = netG(t_input.to(device))
 
     # Resize back
     if orig_h != MODEL_SIZE or orig_w != MODEL_SIZE:
@@ -88,7 +85,7 @@ def main():
     if arr.ndim == 3:
         result = result[np.newaxis, ...]
 
-    # Write output preserving spatial metadata
+    # Write output
     out_img = sitk.GetImageFromArray(result)
     out_img.CopyInformation(img)
 
