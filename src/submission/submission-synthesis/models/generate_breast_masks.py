@@ -120,16 +120,7 @@ def main():
         flood = np.zeros((h+2, w+2), np.uint8)
         mask_inv = breast_mask.copy()
         cv2.floodFill(mask_inv, flood, (0, 0), 1)
-        breast_mask = (breast_mask | (1 - mask_inv)).astype(np.uint8)
-        # Keep only largest connected component
-        from scipy import ndimage
-        labeled, n_components = ndimage.label(breast_mask)
-        if n_components > 1:
-            sizes = ndimage.sum(breast_mask, labeled, range(1, n_components + 1))
-            largest = np.argmax(sizes) + 1
-            breast_mask = (labeled == largest).astype(np.int16)
-        else:
-            breast_mask = breast_mask.astype(np.int16)
+        breast_mask = (breast_mask | (1 - mask_inv)).astype(np.int16)
 
         if arr.ndim == 3:
             breast_mask = breast_mask[np.newaxis, ...]
