@@ -382,3 +382,47 @@ Sagittal 数据混入训练会"污染"模型：
 - Breast mask: ✅ (Dataset910 loss mask)
 - Intensity aug: ✅
 - 与 v11 相同超参，仅去掉 sagittal 数据
+
+---
+
+## 11. v16 Breast Mask Ensemble Pipeline
+
+### 模型组合
+
+| Model | 架构 | Fold | Checkpoint | 大小 |
+|-------|------|------|-----------|------|
+| Model 1 | ResEncUNetL (Dataset910) | fold_0 | checkpoint_best.pth | 1.6 GB |
+| Model 2 | PlainConvUNet (Dataset910) | fold_4 | checkpoint_best.pth | 710 MB |
+
+### 后处理流程
+
+```
+Model 1 predict → mask1 (各自带后处理)
+Model 2 predict → mask2 (各自带后处理)
+         ↓
+    OR 合并 (mask1 | mask2)
+         ↓
+    Drop small components (<10% of largest)
+         ↓
+    Morphological closing (15×15 ellipse kernel)
+         ↓
+    Fill internal holes (floodFill)
+         ↓
+    Spatial analysis of top-2 components:
+      • If left-right (dx > dy): dilate until connected → erode back
+      • If top-bottom (dx < dy): keep only largest
+         ↓
+    Final breast mask (clean, connected)
+```
+
+### v16 训练配置
+
+| 属性 | 值 |
+|------|-----|
+| 数据 | data_split_v4 axial-only (2528 cases) |
+| Breast mask | Ensemble (ResEncUNetL f0 OR PlainConv f4) + postprocess |
+| Intensity aug | ✅ |
+| Epochs | 50 (quick test: niter=25 + niter_decay=25) |
+| 其余超参 | 同 v14 (MSEC=50, tumor=10, etc.) |
+
+### 状态: ⏳ 待训练
