@@ -2,7 +2,7 @@
 #SBATCH -A berzelius-2025-422
 #SBATCH -p berzelius
 #SBATCH --gpus=1
-#SBATCH -t 24:00:00
+#SBATCH -t 48:00:00
 #SBATCH -J mamasynth_v16
 #SBATCH -o /proj/berzbiomedicalimagingkth/users/x_honji/train_%j.log
 #SBATCH -e /proj/berzbiomedicalimagingkth/users/x_honji/train_%j.err
@@ -162,8 +162,8 @@ python train.py \
   --n_blocks_global 9 \
   --norm instance \
   --batchSize 8 \
-  --niter 25 \
-  --niter_decay 25 \
+  --niter 100 \
+  --niter_decay 100 \
   --lr 0.0002 \
   --lambda_feat 10 \
   --lambda_gan 1.0 \
