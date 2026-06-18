@@ -68,23 +68,72 @@ if [ ! -d "$BREAST_MASK_DIR" ]; then
         --model_dir $PROJ/weights/breast_seg/nnUNetTrainer__nnUNetPlans__2d \
         --fold 4 \
         --checkpoint checkpoint_best.pth
-    # Combine with OR
+    # Combine with OR + post-processing
     mkdir -p $BREAST_MASK_DIR
     python -c "
-import os, numpy as np, SimpleITK as sitk
+import os, numpy as np, SimpleITK as sitk, cv2
 from pathlib import Path
+from scipy import ndimage as ndi
+
+def postprocess_mask(mask):
+    mask = mask.astype(np.uint8)
+    # Drop small components (<10% of largest)
+    labeled, n = ndi.label(mask)
+    if n > 1:
+        sizes = ndi.sum(mask, labeled, range(1, n+1))
+        max_size = sizes.max()
+        mask = np.zeros_like(mask, dtype=np.uint8)
+        for idx, s in enumerate(sizes):
+            if s >= max_size * 0.1:
+                mask[labeled == (idx+1)] = 1
+    # Closing
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+    # Fill holes
+    h, w = mask.shape
+    flood = np.zeros((h+2, w+2), np.uint8)
+    inv = mask.copy()
+    cv2.floodFill(inv, flood, (0,0), 1)
+    mask = (mask | (1 - inv)).astype(np.uint8)
+    # Handle multiple components
+    labeled2, n2 = ndi.label(mask)
+    if n2 > 1:
+        sizes2 = ndi.sum(mask, labeled2, range(1, n2+1))
+        top2_idx = np.argsort(sizes2)[-2:] + 1
+        centroids = ndi.center_of_mass(mask, labeled2, top2_idx)
+        c1, c2 = centroids[0], centroids[1]
+        dy, dx = abs(c1[0]-c2[0]), abs(c1[1]-c2[1])
+        if dx > dy:
+            mask_top2 = np.isin(labeled2, top2_idx).astype(np.uint8)
+            dk = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (10,10))
+            temp = mask_top2.copy()
+            for _ in range(30):
+                temp = cv2.dilate(temp, dk)
+                if ndi.label(temp)[1] <= 1: break
+            ek = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (8,8))
+            temp = cv2.erode(temp, ek)
+            mask = ((mask > 0) | (temp > 0)).astype(np.uint8)
+        else:
+            largest = top2_idx[np.argmax([sizes2[i-1] for i in top2_idx])]
+            mask = (labeled2 == largest).astype(np.uint8)
+    return mask
+
 d1 = Path('${BREAST_MASK_DIR}_resenc')
 d2 = Path('${BREAST_MASK_DIR}_plain')
 out = Path('$BREAST_MASK_DIR')
 for f in sorted(d1.glob('*.mha')):
-    m1 = sitk.GetArrayFromImage(sitk.ReadImage(str(f)))
+    m1 = sitk.GetArrayFromImage(sitk.ReadImage(str(f))).squeeze()
     f2 = d2 / f.name
     if f2.exists():
-        m2 = sitk.GetArrayFromImage(sitk.ReadImage(str(f2)))
-        combined = ((m1 > 0) | (m2 > 0)).astype(np.int16)
+        m2 = sitk.GetArrayFromImage(sitk.ReadImage(str(f2))).squeeze()
+        combined = ((m1 > 0) | (m2 > 0)).astype(np.uint8)
     else:
-        combined = (m1 > 0).astype(np.int16)
-    img = sitk.GetImageFromArray(combined)
+        combined = (m1 > 0).astype(np.uint8)
+    final = postprocess_mask(combined)
+    out_arr = final.astype(np.int16)
+    if sitk.GetArrayFromImage(sitk.ReadImage(str(f))).ndim == 3:
+        out_arr = out_arr[np.newaxis,...]
+    img = sitk.GetImageFromArray(out_arr)
     img.CopyInformation(sitk.ReadImage(str(f)))
     sitk.WriteImage(img, str(out / f.name))
 print(f'Ensemble masks: {len(list(out.glob(\"*.mha\")))} files')
