@@ -112,16 +112,60 @@ def main():
 
         breast_mask = np.isin(pred, list(breast_labels)).astype(np.uint8)
 
-        # Morphological post-processing: fill small gaps within regions
+        # Morphological post-processing
         import cv2
+        from scipy import ndimage as ndi
+
+        # Step 1: Drop small components (<10% of largest)
+        labeled, n_comp = ndi.label(breast_mask)
+        if n_comp > 1:
+            sizes = ndi.sum(breast_mask, labeled, range(1, n_comp + 1))
+            max_size = sizes.max()
+            breast_mask = np.zeros_like(breast_mask, dtype=np.uint8)
+            for idx, s in enumerate(sizes):
+                if s >= max_size * 0.1:
+                    breast_mask[labeled == (idx + 1)] = 1
+
+        # Step 2: Closing to smooth edges
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
         breast_mask = cv2.morphologyEx(breast_mask, cv2.MORPH_CLOSE, kernel)
-        # Fill internal holes
+
+        # Step 3: Fill internal holes
         h, w = breast_mask.shape
-        flood = np.zeros((h+2, w+2), np.uint8)
-        mask_inv = breast_mask.copy()
-        cv2.floodFill(mask_inv, flood, (0, 0), 1)
-        breast_mask = (breast_mask | (1 - mask_inv)).astype(np.int16)
+        flood = np.zeros((h + 2, w + 2), np.uint8)
+        inv = breast_mask.copy()
+        cv2.floodFill(inv, flood, (0, 0), 1)
+        breast_mask = (breast_mask | (1 - inv)).astype(np.uint8)
+
+        # Step 4: Handle multiple components based on spatial relationship
+        labeled2, n2 = ndi.label(breast_mask)
+        if n2 > 1:
+            sizes2 = ndi.sum(breast_mask, labeled2, range(1, n2 + 1))
+            top2_idx = np.argsort(sizes2)[-2:] + 1
+            centroids = ndi.center_of_mass(breast_mask, labeled2, top2_idx)
+            c1, c2 = centroids[0], centroids[1]
+            dy = abs(c1[0] - c2[0])
+            dx = abs(c1[1] - c2[1])
+
+            if dx > dy:
+                # Left-right (bilateral): dilate until connected, then erode back
+                mask_top2 = np.isin(labeled2, top2_idx).astype(np.uint8)
+                dilate_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (10, 10))
+                temp = mask_top2.copy()
+                for _ in range(30):
+                    temp = cv2.dilate(temp, dilate_kernel)
+                    _, n_temp = ndi.label(temp)
+                    if n_temp <= 1:
+                        break
+                erode_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (8, 8))
+                temp = cv2.erode(temp, erode_kernel)
+                breast_mask = ((breast_mask > 0) | (temp > 0)).astype(np.uint8)
+            else:
+                # Top-bottom: keep only largest
+                largest = top2_idx[np.argmax([sizes2[i - 1] for i in top2_idx])]
+                breast_mask = (labeled2 == largest).astype(np.uint8)
+
+        breast_mask = breast_mask.astype(np.int16)
 
         if arr.ndim == 3:
             breast_mask = breast_mask[np.newaxis, ...]
