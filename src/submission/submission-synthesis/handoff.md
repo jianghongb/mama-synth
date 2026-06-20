@@ -51,6 +51,7 @@ data_split_v4 = DUKE + ISPY1 + ISPY2 + NACT + LA-Breast + Yunnan + AMBL (7 域)
 | **v14** | **data_split_v4** | **2811** | **✅ ResEncUNetL f0** | **✅** | **全量数据 + breast mask + intensity aug** |
 | v16 | data_split_v4 axial | 2528 | ✅ ensemble (ResEnc+Plain) | ✅ | v14 + ensemble breast mask + axial only |
 | **v17** | **data_split_v4** | **2811** | **✅ ResEncUNetL f0** | **✅** | **v14 + SDEdit diffusion refiner (Stage 2)** |
+| v18 | data_split_v4 axial | 2528 | ✅ ensemble | ✅ | v16 + SDEdit refiner (❌ 失败) |
 | **v16** | **data_split_v4 axial** | **2528** | **✅ ensemble (ResEnc+Plain OR)** | **✅** | **v14 + ensemble mask, 200ep → 🏆 最佳** |
 
 ### 评估结果: data_split_v2/test (150 cases)
@@ -460,3 +461,33 @@ Model 2 predict → mask2 (各自带后处理)
 **结论**: v17 是当前**最佳提交版本** (Dice 0.731, HD95 62.8, LPIPS 0.109)
 
 **下一步**: 在 v16 base 上跑 SDEdit (v18)，因为 v16 Dice=0.722 > v14 Dice=0.703
+
+---
+
+## 16. v18: v16 GAN + SDEdit Refiner (失败分析)
+
+**配置**: v16 GAN (ensemble breast mask, axial-only 2528 cases) + SDEdit refiner
+**训练数据**: data_split_v4_axial/train (同 v16)
+
+**结果 (data_split/test)**:
+
+| Metric | v16 (GAN only) | v17 (v14+SDEdit) | v18 (v16+SDEdit) |
+|--------|:-:|:-:|:-:|
+| MSE ↓ | 0.218 | **0.216** | 0.469 ❌ |
+| LPIPS ↓ | 0.124 | **0.109** | 0.116 |
+| SSIM_tumor ↑ | 0.680 | **0.688** | 0.451 ❌ |
+| FRD ↓ | 11.51 | 10.54 | **9.04** |
+| AUROC ↑ | **0.844** | 0.829 | 0.850 |
+| Dice ↑ | 0.722 | **0.731** | 0.532 ❌ |
+| HD95 ↓ | 63.7 | **62.8** | 127.9 ❌ |
+
+**失败原因**:
+- Dice=0 的 cases: v17 有 15 个，v18 有 **39 个**（多出 24 个完全分割失败）
+- 受影响 dataset: ISPY2 (34 cases) + DUKE (15 cases)，Dice drop > 0.3
+- 即使两者都非零的 158 cases，v18 平均 Dice (0.667) 也远低于 v17 (0.805)
+
+**根因**: v16 的 ensemble breast mask (union + morphology) 比 v14 的单模型 mask 更大、边界更模糊。
+refiner 在这种 mask 策略下训练，学到了过度平滑增强信号的模式，导致 tumor 信号被削弱，
+nnUNet 分割模型找不到 tumor。
+
+**结论**: SDEdit refiner 只适合搭配单模型 breast mask 的 GAN (v14)。v17 仍为最佳。
