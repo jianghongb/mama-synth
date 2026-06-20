@@ -1,29 +1,32 @@
 #!/bin/bash
-set -euo pipefail
-SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &>/dev/null && pwd )
+set -e
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
 
-bash "$SCRIPT_DIR/do_build.sh"
+INPUT_DIR="${1:-test/input}"
+OUTPUT_DIR="${2:-test/output_docker}"
 
-rm -rf "$SCRIPT_DIR/test/output"
-mkdir -p "$SCRIPT_DIR/test/output"
+mkdir -p "$OUTPUT_DIR"
+rm -rf "$OUTPUT_DIR"/*
 
-INPUT_DIR="$SCRIPT_DIR/test/input/images/pre-contrast-dce-mri-slice-breast"
-if [ -z "$(ls -A "$INPUT_DIR"/*.mha 2>/dev/null)" ]; then
-    echo "ERROR: No .mha in $INPUT_DIR"
-    exit 1
-fi
+echo "=== Running inference ==="
+echo "  Input:  $INPUT_DIR"
+echo "  Output: $OUTPUT_DIR"
 
-USE_GPU="${USE_GPU:-1}"
-if [ "$USE_GPU" = "1" ]; then
-    GPU_FLAG="--gpus device=0"
-else
+if [ "${USE_GPU:-1}" = "0" ]; then
     GPU_FLAG=""
+    echo "  Device: CPU"
+else
+    GPU_FLAG="--gpus all"
+    echo "  Device: GPU"
 fi
 
-docker run --rm --network=none $GPU_FLAG \
-    -v "$SCRIPT_DIR/test/input:/input:ro" \
-    -v "$SCRIPT_DIR/test/output:/output" \
-    mama-synth-synthesis
+docker run --rm \
+    $GPU_FLAG \
+    -v "$(realpath $INPUT_DIR)":/input:ro \
+    -v "$(realpath $OUTPUT_DIR)":/output \
+    mamasynth
 
+echo ""
 echo "=== Output ==="
-find "$SCRIPT_DIR/test/output" -type f
+ls -la "$OUTPUT_DIR/images/synthetic-contrast-dce-mri-slice-breast/" 2>/dev/null || echo "No output found!"

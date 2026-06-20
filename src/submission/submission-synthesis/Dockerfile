@@ -6,15 +6,14 @@ RUN groupadd -r user && useradd -m --no-log-init -r -g user user
 
 WORKDIR /opt/app
 
-RUN pip install --no-cache-dir \
-    SimpleITK==2.3.1 \
-    nnunetv2==2.5.1 \
-    dynamic-network-architectures==0.3.1
+RUN pip install --no-cache-dir SimpleITK==2.3.1
 
 COPY --chown=user:user models/networks.py ./models/networks.py
+COPY --chown=user:user models/refiner_network.py ./models/refiner_network.py
+COPY --chown=user:user models/__init__.py ./models/__init__.py
 COPY --chown=user:user inference.py ./
 COPY --chown=user:user weights/latest_net_G.pth ./weights/latest_net_G.pth
-COPY --chown=user:user weights/breast_seg/ ./weights/breast_seg/
+COPY --chown=user:user weights/refiner_latest.pth ./weights/refiner_latest.pth
 
 RUN mkdir -p /output && chown user:user /output
 
