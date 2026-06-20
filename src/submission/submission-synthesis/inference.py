@@ -28,6 +28,7 @@ INPUT_SLUG = "pre-contrast-dce-mri-slice-breast"
 OUTPUT_SLUG = "synthetic-contrast-dce-mri-slice-breast"
 WEIGHTS_PATH = os.environ.get("MAMA_WEIGHTS_PATH", "/opt/app/weights/latest_net_G.pth")
 REFINER_PATH = os.environ.get("MAMA_REFINER_PATH", "/opt/app/weights/refiner_latest.pth")
+RESREFINER_PATH = os.environ.get("MAMA_RESREFINER_PATH", "/opt/app/weights/resrefiner_latest.pth")
 MODEL_SIZE = 512
 
 # SDEdit parameters
@@ -50,15 +51,27 @@ def build_generator(device):
 
 
 def build_refiner(device):
-    """Load refiner if weights exist, otherwise return None."""
+    """Load diffusion refiner if weights exist, otherwise return None."""
     if not Path(REFINER_PATH).exists():
         return None
     from models.refiner_network import RefinerUNet
     refiner = RefinerUNet(in_ch=3, out_ch=1, base_ch=64, ch_mult=(1, 2, 4, 4))
     refiner.load_state_dict(torch.load(REFINER_PATH, map_location=device))
     refiner.to(device).eval()
-    print(f"Refiner loaded from {REFINER_PATH}")
+    print(f"Diffusion refiner loaded from {REFINER_PATH}")
     return refiner
+
+
+def build_residual_refiner(device):
+    """Load residual refiner if weights exist, otherwise return None."""
+    if not Path(RESREFINER_PATH).exists():
+        return None
+    from models.train_residual_refiner import ResidualRefiner
+    resrefiner = ResidualRefiner(base_ch=64)
+    resrefiner.load_state_dict(torch.load(RESREFINER_PATH, map_location=device))
+    resrefiner.to(device).eval()
+    print(f"Residual refiner loaded from {RESREFINER_PATH}")
+    return resrefiner
 
 
 def cosine_alpha_bar(T, s=0.008):
@@ -133,7 +146,8 @@ def main():
 
     # Load models
     netG = build_generator(device)
-    refiner = build_refiner(device)
+    resrefiner = build_residual_refiner(device)
+    refiner = build_refiner(device) if resrefiner is None else None
 
     input_file = find_input_image()
     print(f"Input: {input_file}")
@@ -153,12 +167,19 @@ def main():
     with torch.no_grad():
         gan_out = netG(pre_512)
 
-    # Stage 2: SDEdit refinement (if refiner available)
-    if refiner is not None:
+    # Stage 2: Refinement (if available)
+    if resrefiner is not None:
+        # Residual refiner: single forward pass, output = pre + Δ
+        with torch.no_grad():
+            result_512 = resrefiner(pre_512, gan_out)
+        mode = "residual"
+    elif refiner is not None:
         result_512 = sdedit_refine(refiner, gan_out, pre_512, device,
                                    strength=SDEDIT_STRENGTH, num_steps=DDIM_STEPS)
+        mode = "sdedit"
     else:
         result_512 = gan_out
+        mode = "gan_only"
 
     # Resize back
     if orig_h != MODEL_SIZE or orig_w != MODEL_SIZE:
@@ -179,7 +200,7 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / "output.mha"
     sitk.WriteImage(out_img, str(out_file))
-    print(f"Output: {out_file}  shape={result.shape}  refiner={'ON' if refiner else 'OFF'}")
+    print(f"Output: {out_file}  shape={result.shape}  mode={mode}")
 
 
 if __name__ == "__main__":
