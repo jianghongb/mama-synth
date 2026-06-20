@@ -52,6 +52,7 @@ data_split_v4 = DUKE + ISPY1 + ISPY2 + NACT + LA-Breast + Yunnan + AMBL (7 域)
 | v16 | data_split_v4 axial | 2528 | ✅ ensemble (ResEnc+Plain) | ✅ | v14 + ensemble breast mask + axial only |
 | **v17** | **data_split_v4** | **2811** | **✅ ResEncUNetL f0** | **✅** | **v14 + SDEdit diffusion refiner (Stage 2)** |
 | v18 | data_split_v4 axial | 2528 | ✅ ensemble | ✅ | v16 + SDEdit refiner (❌ 失败) |
+| v19 | data_split_v4 | 2811 | ✅ ResEncUNetL f0 | ✅ | v14 + residual refiner (单步 Δ) ⏳ |
 | **v16** | **data_split_v4 axial** | **2528** | **✅ ensemble (ResEnc+Plain OR)** | **✅** | **v14 + ensemble mask, 200ep → 🏆 最佳** |
 
 ### 评估结果: data_split_v2/test (150 cases)
@@ -491,3 +492,33 @@ refiner 在这种 mask 策略下训练，学到了过度平滑增强信号的模
 nnUNet 分割模型找不到 tumor。
 
 **结论**: SDEdit refiner 只适合搭配单模型 breast mask 的 GAN (v14)。v17 仍为最佳。
+
+---
+
+## 17. v19: Residual Refiner (Supervisor 建议)
+
+**思路**: 不用 diffusion 多步去噪，直接用 UNet 预测残差 Δ，output = pre + Δ。
+
+**与 v17 的区别**:
+
+| | v17 (SDEdit) | v19 (Residual) |
+|---|---|---|
+| 方法 | GAN → 加噪 → 20步去噪 | GAN → 单步 UNet → pre + Δ |
+| 推理时间 | ~5s | **~1s** |
+| 训练 loss | MSE(ε̂, ε) noise prediction | L1(output, gt) |
+| 输入 | 3ch [noisy, pre, gan_out] + timestep | 2ch [pre, gan_out] |
+| 模型 | RefinerUNet 18M | ResidualRefiner ~30M |
+
+**架构**: UNet encoder(4层) → bottleneck → decoder(skip connections) → predict Δ
+- 输入: [pre-contrast, GAN output] concat (2ch)
+- 输出: residual Δ (1ch)
+- 最终: output = pre + Δ
+
+**训练配置**:
+- Base GAN: v14 (frozen)
+- Data: data_split_v4/train
+- Loss: L1(pre + Δ, gt)
+- Epochs: 100, batch=8, lr=2e-4
+- 脚本: `berzelius_train_v19.sh`
+
+**状态**: ⏳ 训练中
