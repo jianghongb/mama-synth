@@ -48,8 +48,8 @@ data_split_v4 = DUKE + ISPY1 + ISPY2 + NACT + LA-Breast + Yunnan + AMBL (7 域)
 | v11 | data_split_v4 | 2811 | ✅ | ✅ | v10 + intensity augmentation |
 | v12 | data_split_v5 | ~1400 | 预处理去胸壁 | ❌ | Dataset932 3D mask 预处理, 无 runtime mask |
 | v13 | data_split_v5 | ~1236 | 预处理去胸壁 | ❌ | v12 去掉 ISPY1/NACT (axial only) |
-| **v14** | **data_split_v4 axial** | **2528** | **✅ ResEncUNetL f0** | **✅** | **v11 去掉 sagittal → 🏆 最佳** |
-| v16 | data_split_v4 axial | 2528 | ✅ ensemble (ResEnc+Plain OR) | ✅ | v14 + ensemble mask, 50 epochs only |
+| **v14** | **data_split_v4 axial** | **2528** | **✅ ResEncUNetL f0** | **✅** | **v11 去掉 sagittal** |
+| **v16** | **data_split_v4 axial** | **2528** | **✅ ensemble (ResEnc+Plain OR)** | **✅** | **v14 + ensemble mask, 200ep → 🏆 最佳** |
 
 ### 评估结果: data_split_v2/test (150 cases)
 
@@ -67,20 +67,19 @@ data_split_v4 = DUKE + ISPY1 + ISPY2 + NACT + LA-Breast + Yunnan + AMBL (7 域)
 
 | Metric | v5 | v9 | v11 | v12 | v13* | v14* | v16* | Best |
 |--------|:-:|:-:|:-:|:-:|:-:|:-:|:-:|------|
-| MSE ↓ | 0.618 | 0.270 | 0.246 | 1.017 | 1.193 | **0.212** | 0.469 | v14 |
-| LPIPS ↓ | 0.148 | 0.118 | 0.125 | 0.238 | 0.208 | 0.126 | **0.119** | v16 |
-| SSIM_tumor ↑ | 0.361 | 0.599 | 0.581 | 0.321 | 0.384 | **0.689** | 0.448 | v14 |
-| FRD ↓ | 10.75 | **9.41** | 9.41 | 10.32 | 12.02 | 11.90 | 10.11 | v11 |
-| AUROC ↑ | 0.867 | 0.837 | 0.828 | 0.891 | 0.892 | 0.831 | **0.854** | v12/v13 |
-| Dice ↑ | 0.388 | 0.561 | 0.565 | 0.363 | 0.319 | **0.703** | 0.507 | v14 |
-| HD95 ↓ | 186.7 | 115.4 | 108.1 | 203.9 | 276.9 | **68.9** | 135.5 | v14 |
+| MSE ↓ | 0.618 | 0.270 | 0.246 | 1.017 | 1.193 | 0.212 | **0.218** | v14 |
+| LPIPS ↓ | 0.148 | 0.118 | 0.125 | 0.238 | 0.208 | 0.126 | **0.124** | v16 |
+| SSIM_tumor ↑ | 0.361 | 0.599 | 0.581 | 0.321 | 0.384 | **0.689** | 0.680 | v14 |
+| FRD ↓ | 10.75 | **9.41** | 9.41 | 10.32 | 12.02 | 11.90 | 11.51 | v11 |
+| AUROC ↑ | 0.867 | 0.837 | 0.828 | 0.891 | 0.892 | 0.831 | **0.844** | v12/v13 |
+| Dice ↑ | 0.388 | 0.561 | 0.565 | 0.363 | 0.319 | 0.703 | **0.722** | 🏆 v16 |
+| HD95 ↓ | 186.7 | 115.4 | 108.1 | 203.9 | 276.9 | 68.9 | **63.7** | 🏆 v16 |
 
-*v13/v14/v16 在 199 axial cases 上评估（test set 去掉了 ISPY1/NACT sagittal cases）
-*v16 只训练了 50 epochs（其余为 200 epochs）
+*v13/v14/v16 在 199 axial cases 上评估
+*v16 full = 200 epochs with ensemble breast mask (ResEncUNetL f0 OR PlainConvUNet f4)
 
-**v14 分析**: 去掉 sagittal 数据(ISPY1+NACT+AMBL)后，模型专注 axial → Dice +24%, HD95 -36%。
-**v16 分析**: ensemble breast mask 有潜力(LPIPS/FRD 更好)，但 50 epochs 欠训练导致 Dice/SSIM 落后。
-**结论: v14 为最佳提交版本。** Dice 0.703, HD95 68.9 远超其他版本。
+**v16 分析**: ensemble breast mask (200 epochs) 在 Dice (+2.7%) 和 HD95 (-7.5%) 上超越 v14。
+**结论: v16 为最佳提交版本。** Dice 0.722, HD95 63.7。
 
 ### Yunnan 外部验证 (100 cases, 独立数据)
 
