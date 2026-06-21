@@ -18,6 +18,7 @@ PROJ=/proj/berzbiomedicalimagingkth/users/x_honji
 module load Miniforge3/25.3.1-0
 eval "$(conda shell.bash hook)"
 conda activate $PROJ/envs/gan
+pip show opencv-python-headless > /dev/null 2>&1 || pip install opencv-python-headless
 
 FILTERED=$PROJ/data_split_v4_axial/train/mha
 BREAST_MASK_DIR=$PROJ/data_split_v4_axial/train/mha/breast_mask_920
