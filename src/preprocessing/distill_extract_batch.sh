@@ -58,7 +58,7 @@ for seg_file in batch_segs:
         continue
     p0_nii = nib.load(str(p0_path))
     p0 = p0_nii.get_fdata(dtype=np.float32)
-    seg = nib.load(str(seg_file)).get_fdata(dtype=np.uint8)
+    seg = nib.load(str(seg_file)).get_fdata().astype(np.uint8)
     n_slices = p0.shape[2]
     for s in range(n_slices // 4, 3 * n_slices // 4, max(1, n_slices // 8)):
         p0_slice = p0[:, :, s]
