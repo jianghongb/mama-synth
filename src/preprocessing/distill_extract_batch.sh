@@ -6,6 +6,8 @@
 #SBATCH -J distill_ext
 #SBATCH -o /proj/berzbiomedicalimagingkth/users/x_honji/distill_ext_%j.log
 #SBATCH -e /proj/berzbiomedicalimagingkth/users/x_honji/distill_ext_%j.err
+#SBATCH --mail-type=END,FAIL
+#SBATCH --mail-user=hongjia@kth.se
 #
 # Extract 2D slices from 3D predictions, batch N
 # Usage: sbatch distill_extract_batch.sh <0|1>
