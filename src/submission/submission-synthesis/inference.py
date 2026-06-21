@@ -83,7 +83,7 @@ def cosine_alpha_bar(T, s=0.008):
 
 
 @torch.no_grad()
-def sdedit_refine(refiner, gan_output, pre, device, strength=0.3, num_steps=20, T=1000):
+def sdedit_refine(refiner, gan_output, pre, device, strength=0.3, num_steps=20, T=1000, mask=None):
     """SDEdit: add noise to GAN output, then denoise with DDIM.
 
     Args:
@@ -92,6 +92,7 @@ def sdedit_refine(refiner, gan_output, pre, device, strength=0.3, num_steps=20, 
         pre: (1, 1, H, W) pre-contrast input
         strength: fraction of noise schedule to use (0.3 = start from t=300)
         num_steps: DDIM sampling steps
+        mask: (1, 1, H, W) optional binary mask — only apply refinement inside mask
     """
     alpha_bar = cosine_alpha_bar(T).to(device)
 
@@ -129,6 +130,10 @@ def sdedit_refine(refiner, gan_output, pre, device, strength=0.3, num_steps=20, 
             x_t = torch.sqrt(ab_next) * x0_pred + torch.sqrt(1 - ab_next) * eps_pred
         else:
             x_t = x0_pred
+
+    # If mask provided, only apply refinement inside mask
+    if mask is not None:
+        x_t = mask * x_t + (1 - mask) * gan_output
 
     return x_t
 
