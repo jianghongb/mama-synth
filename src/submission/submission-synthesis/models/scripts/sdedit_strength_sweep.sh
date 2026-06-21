@@ -23,6 +23,8 @@ module load Miniforge3/25.3.1-0
 eval "$(conda shell.bash hook)"
 conda activate $PROJ/envs/gan
 
+pip install xgboost scikit-learn --quiet 2>/dev/null
+
 TEST_INPUT=$PROJ/data_split/test/mha/input
 TEST_GT=$PROJ/data_split/test/mha
 GAN_WEIGHTS=$PROJ/checkpoints/mamasynth_v14/latest_net_G.pth
