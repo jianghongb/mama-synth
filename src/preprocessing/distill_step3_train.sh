@@ -30,6 +30,6 @@ echo "Preprocessing Dataset920..."
 nnUNetv2_plan_and_preprocess -d 920 -c 2d --verify_dataset_integrity
 
 echo "Training fold 0..."
-nnUNetv2_train 920 2d 0 --npz
+nnUNet_compile=0 nnUNetv2_train 920 2d 0 --npz
 
 echo "Done! Model at: $nnUNet_results/Dataset920_BreastSeg2D/"
