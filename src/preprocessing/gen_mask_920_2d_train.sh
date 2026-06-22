@@ -71,16 +71,23 @@ todo = [f for f in files if f.name not in existing]
 print(f'Total: {len(files)}, Already done: {len(existing)}, Todo: {len(todo)}')
 
 for f in tqdm(todo):
-    img = sitk.ReadImage(str(f))
-    arr = sitk.GetArrayFromImage(img).astype(np.float32)
-    input_arr = arr[np.newaxis, np.newaxis]
-    props = {'sitk_stuff': {'spacing': (1.,1.,1.), 'origin': (0.,0.,0.),
-             'direction': (1.,0.,0.,0.,1.,0.,0.,0.,1.)}, 'spacing': [1.,1.,1.]}
-    pred = predictor.predict_single_npy_array(input_arr, props, None, None, False)
-    mask = (pred > 0).astype(np.float32).squeeze()
-    mask_img = sitk.GetImageFromArray(mask)
-    mask_img.CopyInformation(img)
-    sitk.WriteImage(mask_img, str(output_dir / f.name))
+    try:
+        img = sitk.ReadImage(str(f))
+        arr = sitk.GetArrayFromImage(img).astype(np.float32)
+        if arr.ndim != 2:
+            print(f'SKIP {f.name}: shape={arr.shape} (not 2D)')
+            continue
+        input_arr = arr[np.newaxis, np.newaxis]
+        props = {'sitk_stuff': {'spacing': (1.,1.,1.), 'origin': (0.,0.,0.),
+                 'direction': (1.,0.,0.,0.,1.,0.,0.,0.,1.)}, 'spacing': [1.,1.,1.]}
+        pred = predictor.predict_single_npy_array(input_arr, props, None, None, False)
+        mask = (pred > 0).astype(np.float32).squeeze()
+        mask_img = sitk.GetImageFromArray(mask)
+        mask_img.CopyInformation(img)
+        sitk.WriteImage(mask_img, str(output_dir / f.name))
+    except Exception as e:
+        print(f'ERROR {f.name}: {e}')
+        continue
 
 print(f'Done. {len(list(output_dir.glob(\"*.mha\")))} masks in {output_dir}')
 "
