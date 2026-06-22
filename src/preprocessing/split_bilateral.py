@@ -43,8 +43,8 @@ logger = logging.getLogger(__name__)
 
 
 def read_mha(path: Path) -> np.ndarray:
-    """Read MHA file as float32 numpy array."""
-    return sitk.GetArrayFromImage(sitk.ReadImage(str(path))).astype(np.float32)
+    """Read MHA file as float32 numpy array (squeezed to 2D)."""
+    return sitk.GetArrayFromImage(sitk.ReadImage(str(path))).astype(np.float32).squeeze()
 
 
 def save_mha(arr: np.ndarray, path: Path, is_label: bool = False) -> None:
@@ -54,6 +54,64 @@ def save_mha(arr: np.ndarray, path: Path, is_label: bool = False) -> None:
     else:
         arr = arr.astype(np.float32)
     sitk.WriteImage(sitk.GetImageFromArray(arr), str(path))
+
+
+def find_chest_cut_row(mask: np.ndarray, pad: int = 20) -> Optional[int]:
+    """Find the row where chest wall begins, to trim the breast mask.
+
+    Scans from the vertical middle downward using horizontal line intersections.
+    Metric: gap = (pt1+pt4) - (pt2+pt3) where pts are the 4 mask boundary crossings.
+    Returns the row of the first local minimum of smoothed gap + padding.
+    Falls back to the merge row (where 4 crossings become fewer) if no local min found.
+    """
+    h, w = mask.shape
+    row_has_mask = np.where(np.any(mask > 0, axis=1))[0]
+    if len(row_has_mask) == 0:
+        return None
+
+    start_row = (row_has_mask[0] + row_has_mask[-1]) // 2
+    gaps = []
+    gap_rows = []
+    merge_row = None
+
+    for row in range(start_row, row_has_mask[-1] + 1):
+        line = mask[row, :]
+        diff = np.diff(line.astype(np.int8))
+        enters = np.where(diff == 1)[0]
+        exits = np.where(diff == -1)[0]
+
+        if len(enters) == 2 and len(exits) == 2:
+            pt1, pt2, pt3, pt4 = enters[0], exits[0], enters[1], exits[1]
+            gap = (pt1 + pt4) - (pt2 + pt3)
+            gaps.append(gap)
+            gap_rows.append(row)
+        else:
+            if len(enters) >= 1 and len(exits) >= 1:
+                merge_row = row
+            break
+
+    if len(gaps) < 3:
+        if merge_row is not None:
+            return merge_row + pad
+        return None
+
+    gaps_arr = np.array(gaps, dtype=np.float32)
+    kernel = 5
+    if len(gaps_arr) > kernel:
+        gaps_smooth = np.convolve(gaps_arr, np.ones(kernel) / kernel, mode='valid')
+        offset = kernel // 2
+    else:
+        gaps_smooth = gaps_arr
+        offset = 0
+
+    for i in range(1, len(gaps_smooth) - 1):
+        if gaps_smooth[i] <= gaps_smooth[i - 1] and gaps_smooth[i] < gaps_smooth[i + 1]:
+            return gap_rows[i + offset] + pad
+
+    # No local min found — fallback to merge row
+    if merge_row is not None:
+        return merge_row + pad
+    return None
 
 
 def find_midline(breast_mask: np.ndarray) -> Optional[int]:
@@ -160,6 +218,7 @@ def process_patient(
     target_size: Optional[int],
     pad_ratio: float,
     mask_output: bool = True,
+    chest_cut: bool = False,
 ) -> list:
     """Split one bilateral patient into L/R unilateral crops.
 
@@ -168,6 +227,12 @@ def process_patient(
     pre = read_mha(input_path)
     breast_mask = read_mha(breast_mask_path)
     breast_mask = (breast_mask > 0).astype(np.float32)
+
+    # Optional chest wall removal
+    if chest_cut:
+        cut_row = find_chest_cut_row(breast_mask, pad=20)
+        if cut_row is not None and cut_row < breast_mask.shape[0]:
+            breast_mask[cut_row:, :] = 0
 
     gt = read_mha(gt_path) if gt_path and gt_path.exists() else None
     tumour_mask = read_mha(mask_path) if mask_path and mask_path.exists() else None
@@ -251,6 +316,8 @@ def main():
                         help="Padding around breast bbox as ratio of image size (default: 0.05)")
     parser.add_argument("--no_breast_mask_output", action="store_true",
                         help="Don't save cropped breast masks")
+    parser.add_argument("--chest_cut", action="store_true",
+                        help="Remove chest wall by trimming mask below breast-chest boundary")
     args = parser.parse_args()
 
     input_dir = Path(args.input_dir)
@@ -293,6 +360,7 @@ def main():
             target_size=args.target_size,
             pad_ratio=args.pad_ratio,
             mask_output=not args.no_breast_mask_output,
+            chest_cut=args.chest_cut,
         )
         total_generated += len(generated)
         if generated:

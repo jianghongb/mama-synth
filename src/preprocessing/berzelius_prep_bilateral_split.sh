@@ -144,7 +144,8 @@ python src/preprocessing/split_bilateral.py \
     --breast_mask_dir $TRAIN_BREAST \
     --output_dir $OUTPUT_TRAIN \
     --target_size $TARGET_SIZE \
-    --pad_ratio 0.03
+    --pad_ratio 0.03 \
+    --chest_cut
 
 TRAIN_COUNT=$(ls $OUTPUT_TRAIN/mha/input/*.mha 2>/dev/null | wc -l)
 echo "=== Training: $TRAIN_COUNT unilateral crops ==="
@@ -160,7 +161,8 @@ python src/preprocessing/split_bilateral.py \
     --breast_mask_dir $TEST_BREAST \
     --output_dir $OUTPUT_TEST \
     --target_size $TARGET_SIZE \
-    --pad_ratio 0.03
+    --pad_ratio 0.03 \
+    --chest_cut
 
 TEST_COUNT=$(ls $OUTPUT_TEST/mha/input/*.mha 2>/dev/null | wc -l)
 echo "=== Test: $TEST_COUNT unilateral crops ==="

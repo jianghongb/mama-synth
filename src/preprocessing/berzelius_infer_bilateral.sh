@@ -72,6 +72,7 @@ os.environ['nnUNet_results'] = '$PROJ/nnUNet_results'
 
 from models.networks import GlobalGenerator
 from stitch_bilateral import BilateralSplitter
+from split_bilateral import find_chest_cut_row
 from functools import partial
 import torch.nn as nn
 
@@ -127,6 +128,11 @@ for f in tqdm(files):
             if s >= thresh:
                 bm[labeled == (i+1)] = 1
     breast_mask = bm.astype(np.float32)
+
+    # Chest wall removal
+    cut_row = find_chest_cut_row(breast_mask, pad=20)
+    if cut_row is not None and cut_row < breast_mask.shape[0]:
+        breast_mask[cut_row:, :] = 0
 
     # Split
     left, right, meta = splitter.split(sl, breast_mask)
