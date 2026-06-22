@@ -74,8 +74,10 @@ for f in tqdm(todo):
     try:
         img = sitk.ReadImage(str(f))
         arr = sitk.GetArrayFromImage(img).astype(np.float32)
+        was_3d = False
         if arr.ndim == 3 and arr.shape[0] == 1:
             arr = arr[0]
+            was_3d = True
         if arr.ndim != 2:
             print(f'SKIP {f.name}: shape={arr.shape} (not 2D)')
             continue
@@ -84,6 +86,8 @@ for f in tqdm(todo):
                  'direction': (1.,0.,0.,0.,1.,0.,0.,0.,1.)}, 'spacing': [1.,1.,1.]}
         pred = predictor.predict_single_npy_array(input_arr, props, None, None, False)
         mask = (pred > 0).astype(np.float32).squeeze()
+        if was_3d:
+            mask = mask[np.newaxis]
         mask_img = sitk.GetImageFromArray(mask)
         mask_img.CopyInformation(img)
         sitk.WriteImage(mask_img, str(output_dir / f.name))
