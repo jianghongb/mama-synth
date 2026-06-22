@@ -36,7 +36,15 @@ mkdir -p $MASK_OUTPUT
 
 echo "Input: $TRAIN_INPUT"
 echo "Output: $MASK_OUTPUT"
-echo "Model: $PROJ/nnUNet_results/Dataset920_BreastSeg2D/nnUNetTrainer__nnUNetPlans__2d/fold_0"
+echo "Model: $PROJ/nnUNet_results/Dataset920_BreastSeg2D/nnUNetTrainer__nnUNetPlans__2d"
+
+# Verify model exists
+if [ ! -f "$PROJ/nnUNet_results/Dataset920_BreastSeg2D/nnUNetTrainer__nnUNetPlans__2d/fold_0/checkpoint_final.pth" ]; then
+    echo "ERROR: Model not found. Listing available paths:"
+    find $PROJ -path "*Dataset920*" -type f -name "*.pth" 2>/dev/null
+    find $PROJ -path "*Dataset920*" -type f -name "dataset.json" 2>/dev/null
+    exit 1
+fi
 
 python -c "
 import os, numpy as np, torch, SimpleITK as sitk
@@ -50,11 +58,12 @@ from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
 
 input_dir = Path('$TRAIN_INPUT')
 output_dir = Path('$MASK_OUTPUT')
-model_dir = '$PROJ/nnUNet_results/Dataset920_BreastSeg2D/nnUNetTrainer__nnUNetPlans__2d/fold_0'
+model_dir = '$PROJ/nnUNet_results/Dataset920_BreastSeg2D/nnUNetTrainer__nnUNetPlans__2d'
 
 predictor = nnUNetPredictor(tile_step_size=0.5, use_gaussian=True, use_mirroring=False,
     perform_everything_on_device=True, device=torch.device('cuda'), verbose=False, allow_tqdm=False)
 predictor.initialize_from_trained_model_folder(model_dir, use_folds=(0,), checkpoint_name='checkpoint_final.pth')
+print('Model loaded successfully')
 
 files = sorted(input_dir.glob('*.mha'))
 existing = set(f.name for f in output_dir.glob('*.mha'))
