@@ -85,7 +85,15 @@ for f in tqdm(todo):
         props = {'sitk_stuff': {'spacing': (1.,1.,1.), 'origin': (0.,0.,0.),
                  'direction': (1.,0.,0.,0.,1.,0.,0.,0.,1.)}, 'spacing': [1.,1.,1.]}
         pred = predictor.predict_single_npy_array(input_arr, props, None, None, False)
-        mask = (pred > 0).astype(np.float32).squeeze()
+        mask = (pred > 0).astype(np.uint8).squeeze()
+        # Keep only largest connected component
+        from scipy.ndimage import label
+        labeled, n = label(mask)
+        if n > 1:
+            sizes = [np.sum(labeled == i) for i in range(1, n+1)]
+            mask = (labeled == (np.argmax(sizes) + 1)).astype(np.float32)
+        else:
+            mask = mask.astype(np.float32)
         if was_3d:
             mask = mask[np.newaxis]
         mask_img = sitk.GetImageFromArray(mask)
