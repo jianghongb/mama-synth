@@ -74,6 +74,8 @@ for f in tqdm(todo):
     try:
         img = sitk.ReadImage(str(f))
         arr = sitk.GetArrayFromImage(img).astype(np.float32)
+        if arr.ndim == 3 and arr.shape[0] == 1:
+            arr = arr[0]
         if arr.ndim != 2:
             print(f'SKIP {f.name}: shape={arr.shape} (not 2D)')
             continue
