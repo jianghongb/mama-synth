@@ -31,7 +31,7 @@ def define_G(input_nc, output_nc, ngf, netG, n_downsample_global=3, n_blocks_glo
         netG = GlobalGenerator(input_nc, output_nc, ngf, n_downsample_global, n_blocks_global, norm_layer, residual_mode=residual_mode)       
     elif netG == 'local':        
         netG = LocalEnhancer(input_nc, output_nc, ngf, n_downsample_global, n_blocks_global, 
-                                  n_local_enhancers, n_blocks_local, norm_layer)
+                                  n_local_enhancers, n_blocks_local, norm_layer, residual_mode=residual_mode)
     elif netG == 'encoder':
         netG = Encoder(input_nc, output_nc, ngf, n_downsample_global, norm_layer)
     else:
@@ -132,9 +132,11 @@ class VGGLoss(nn.Module):
 ##############################################################################
 class LocalEnhancer(nn.Module):
     def __init__(self, input_nc, output_nc, ngf=32, n_downsample_global=3, n_blocks_global=9, 
-                 n_local_enhancers=1, n_blocks_local=3, norm_layer=nn.BatchNorm2d, padding_type='reflect'):        
+                 n_local_enhancers=1, n_blocks_local=3, norm_layer=nn.BatchNorm2d, padding_type='reflect',
+                 residual_mode=False):        
         super(LocalEnhancer, self).__init__()
         self.n_local_enhancers = n_local_enhancers
+        self.residual_mode = residual_mode
         
         ###### global generator model #####           
         ngf_global = ngf * (2**n_local_enhancers)
@@ -160,8 +162,12 @@ class LocalEnhancer(nn.Module):
                                norm_layer(ngf_global), nn.ReLU(True)]      
 
             ### final convolution
-            if n == n_local_enhancers:                
-                model_upsample += [nn.ReflectionPad2d(3), nn.Conv2d(ngf, output_nc, kernel_size=7, padding=0), nn.Tanh()]                       
+            if n == n_local_enhancers:
+                if residual_mode:
+                    # No Tanh — output is unbounded residual delta
+                    model_upsample += [nn.ReflectionPad2d(3), nn.Conv2d(ngf, output_nc, kernel_size=7, padding=0)]
+                else:
+                    model_upsample += [nn.ReflectionPad2d(3), nn.Conv2d(ngf, output_nc, kernel_size=7, padding=0), nn.Tanh()]                       
             
             setattr(self, 'model'+str(n)+'_1', nn.Sequential(*model_downsample))
             setattr(self, 'model'+str(n)+'_2', nn.Sequential(*model_upsample))                  
@@ -182,6 +188,9 @@ class LocalEnhancer(nn.Module):
             model_upsample = getattr(self, 'model'+str(n_local_enhancers)+'_2')            
             input_i = input_downsampled[self.n_local_enhancers-n_local_enhancers]            
             output_prev = model_upsample(model_downsample(input_i) + output_prev)
+
+        if self.residual_mode:
+            return input[:, :output_prev.shape[1], :, :] + output_prev
         return output_prev
 
 class GlobalGenerator(nn.Module):
