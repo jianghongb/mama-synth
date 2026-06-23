@@ -162,6 +162,40 @@ v3 Mean Position ≈ 16.1
 
 ---
 
+## 5b. GC Test Cohort 特征分析
+
+### 官方测试集描述
+
+| 属性 | Test A (Radboud, NL) | Test B (Fleming, AR) | 训练集 (MAMA-MIA) |
+|------|:-:|:-:|:-:|
+| Cases | 200 | 100 | 1,506 |
+| 图像尺寸 | **416×416** | 512×512 | 多种 |
+| 方向 | Axial | Axial | Axial 84.4%, Sagittal 15.6% |
+| 场强 | 3T | 1.5T | 1.5T 72.1%, 3T 27.9% |
+| 厂商 | Siemens | GE | GE 64%, Siemens 27%, Philips 9% |
+| 脂肪抑制 | Yes | Yes | — |
+| Pixel spacing | 0.87 mm | — | — |
+| TR/TE | 5-10/2-5 ms | 4.2/2 ms | — |
+| Slice thickness | ~1 mm | 1.1 mm | — |
+| 分子亚型 | Luminal 86%, TN 9% | Luminal 37%, TN 30% | — |
+
+### 对模型选择的影响
+
+1. **416×416 新尺寸 (Test A)**: 训练数据中无此分辨率，但 resize→512→推理→resize 回来无问题
+2. **全 Axial**: 确认去掉 sagittal 数据 (v14+) 的决策正确
+3. **Test A = Siemens 3T + 脂肪抑制**: 训练数据中 Siemens 仅 27%，可能泛化稍弱
+4. **Test B = GE 1.5T**: 与训练主力 (GE 64%) 匹配好，预期表现更稳
+5. **Test B TN 30%**: Triple Negative 肿瘤占比高，增强模式可能不同
+6. **Single-institution**: 比多中心一致性更好，但域偏移可能更集中
+
+### 模型策略建议
+
+- **v20 (全图 GAN)** 最稳健: intensity aug 提供厂商/场强鲁棒性，无 mask 边界问题
+- **v21 bilateral split** 对 416×416 小图不友好 (crop 后分辨率过低)
+- **建议提交 v20** 作为主力版本
+
+---
+
 ## 6. Docker 提交
 
 ```
@@ -738,3 +772,33 @@ v20 用 Dataset920 (distilled 2D，从 Dataset932 3D 蒸馏而来) 生成训练 
 - AUROC 0.931 → 合成增强信号方向和强度正确
 - Dice 0.51 ± 0.03 → 低于单次全量训练 (v14: 0.703)，因为每 fold 只用 80% 数据训练
 - MSE 偏高 (0.717) 因为包含 YUNNAN 数据 (z-score 分布不同于 DUKE/ISPY2)
+
+---
+
+## 19. v22: Deeper Network (n_blocks=12)
+
+**动机**: Supervisor 建议加深网络。当前 9 blocks 的 bottleneck 可能限制了模型对全局增强模式的建模能力。
+
+**方案对比**:
+
+| 方案 | 改动 | 参数增量 | 风险 |
+|------|------|---------|------|
+| **增加 ResBlocks (选用)** | 9→12 blocks | +2M (182→184M) | 低，不影响显存/batch |
+| 增加 downsampling | 4→5 层 | ~+10M | 中，空间细节丢失 |
+| 增加通道数 | ngf 64→96 | +230M (→410M) | 高，batch 需减半 |
+| Local Enhancer | 加 fine branch | +50M | 高，训练复杂 |
+
+**v22 配置**:
+- 基础: v20 (Dataset920 mask, axial-only 2528 cases)
+- 唯一改动: `n_blocks_global: 9 → 12`
+- 其余超参完全一致
+- 脚本: `berzelius_train_v22_deeper.sh`
+
+**预期效果**:
+- 更深 bottleneck → 更大感受野 → 更好的全局增强一致性
+- 对 Dice/HD95 可能有帮助（更准确的 tumor 增强定位）
+- 训练时间略增（~10%）
+
+**状态**: ⏳ 待训练
+
+**后续**: 若 12 blocks 有效，可叠加 ngf=96（方案3）进一步提升。
