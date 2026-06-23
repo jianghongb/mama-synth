@@ -647,6 +647,28 @@ v20 用 Dataset920 (distilled 2D，从 Dataset932 3D 蒸馏而来) 生成训练 
 
 **下一步**: v20 + SDEdit refiner (v21?) 有望结合两者：v20 的像素精度 + SDEdit 的分割提升。
 
+### v20 推理时 Breast Mask 验证
+
+**实验**: 在 v20 推理时加入 Dataset920 breast mask，`output = mask × synthetic + (1-mask) × pre`
+
+| Metric | v20 (无 mask) | v20 + mask | 变化 |
+|--------|:-:|:-:|------|
+| MSE ↓ | **0.191** | 0.817 | ❌ +328% |
+| LPIPS ↓ | **0.100** | 0.107 | ❌ +7% |
+| SSIM_tumor ↑ | **0.704** | 0.698 | ❌ -0.9% |
+| FRD ↓ | 12.52 | **12.26** | ✅ 微弱 |
+| Dice ↑ | **0.718** | 0.705 | ❌ -1.8% |
+| HD95 ↓ | **67.0** | 72.3 | ❌ +7.9% |
+
+**结论: 推理时加 mask 全面恶化**，与 v17 的对比实验结果一致。
+
+**原因**:
+1. GT 是 post-contrast 全图，mask 外区域 ≠ pre-contrast（全身组织都有轻微增强）。用 pre 填充 mask 外 → 与 GT 产生大量误差 → MSE 暴涨。
+2. Mask 硬边界产生不自然强度跳变 → LPIPS 感知网络敏感 → 分割模型也受干扰。
+3. GAN 残差模式 (`output = pre + Δ`) 已学到全图微弱增强，比硬塞 pre 值更接近 GT。
+
+**决策: v20 提交维持 GAN-only 直出，不加推理时 mask。**
+
 ---
 
 ## 17. K-Fold Cross-Validation
