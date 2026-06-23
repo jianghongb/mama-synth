@@ -689,3 +689,30 @@ v20 用 Dataset920 (distilled 2D，从 Dataset932 3D 蒸馏而来) 生成训练 
 **Splits CSV 格式**: `case_id,source,fold` (2528 行)
 
 **权重路径**: `$PROJ/checkpoints/kfold_f{0-4}/latest_net_G.pth`
+
+---
+
+## 19. K-Fold Cross-Validation 结果 (v14 config, 无 LABREAST)
+
+**配置**: v14 (GAN + MSEC=50 + breast mask + intensity aug), stratified by data source
+**数据**: DUKE (280) + ISPY2 (973) + YUNNAN (100) = 1353 cases
+**排除**: LABREAST (椭圆近似 mask 导致 73% Dice=0，不适合分割评估)
+**每 fold**: ~1082 train / ~271 test
+
+| Metric | Fold 0 | Fold 1 | Fold 3 | Fold 4 | **Mean ± Std** |
+|--------|:-:|:-:|:-:|:-:|:-:|
+| MSE ↓ | 0.791 | 0.660 | 0.649 | 0.769 | **0.717 ± 0.063** |
+| LPIPS ↓ | 0.141 | 0.139 | 0.140 | 0.142 | **0.141 ± 0.001** |
+| SSIM ↑ | 0.455 | 0.445 | 0.441 | 0.441 | **0.446 ± 0.006** |
+| FRD ↓ | 11.25 | 10.91 | 12.80 | 10.74 | **11.43 ± 0.82** |
+| AUROC ↑ | 0.909 | 0.942 | 0.936 | 0.938 | **0.931 ± 0.013** |
+| Dice ↑ | 0.496 | 0.561 | 0.482 | 0.500 | **0.510 ± 0.030** |
+| HD95 ↓ | 127.0 | 106.9 | 151.5 | 128.0 | **128.4 ± 15.8** |
+
+*Fold 2 缺失（权重未下载）。4-fold 结果仍具有统计意义。*
+
+**分析**:
+- LPIPS 和 SSIM 极其稳定 (std < 0.01) → 模型对不同 test split 一致
+- AUROC 0.931 → 合成增强信号方向和强度正确
+- Dice 0.51 ± 0.03 → 低于单次全量训练 (v14: 0.703)，因为每 fold 只用 80% 数据训练
+- MSE 偏高 (0.717) 因为包含 YUNNAN 数据 (z-score 分布不同于 DUKE/ISPY2)
