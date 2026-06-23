@@ -20,14 +20,19 @@ def main():
     parser.add_argument("--data_dir", required=True, help="Directory with input/, ground_truth/, mask/, breast_mask/")
     parser.add_argument("--output_dir", required=True)
     parser.add_argument("--fold", type=int, required=True)
+    parser.add_argument("--train_only_sources", default="", help="Comma-separated sources always in train, never in test (e.g. LABREAST)")
     args = parser.parse_args()
+
+    train_only = set(s.strip() for s in args.train_only_sources.split(",") if s.strip())
 
     # Load splits
     fold_map = {}
+    source_map = {}
     with open(args.splits_csv) as f:
         reader = csv.DictReader(f)
         for row in reader:
             fold_map[row['case_id']] = int(row['fold'])
+            source_map[row['case_id']] = row.get('source', '')
 
     data_dir = Path(args.data_dir)
     output_dir = Path(args.output_dir)
@@ -47,9 +52,14 @@ def main():
                 if not src_file.exists():
                     continue
 
-                # test = current fold, train = all other folds
-                is_test = (fold == args.fold)
-                if (split == 'test' and is_test) or (split == 'train' and not is_test):
+                # train_only sources always go to train
+                if source_map.get(case_id, '') in train_only:
+                    target_split = 'train'
+                else:
+                    # test = current fold, train = all other folds
+                    target_split = 'test' if fold == args.fold else 'train'
+
+                if split == target_split:
                     dst_file = dst_dir / f"{case_id}.mha"
                     if not dst_file.exists():
                         os.symlink(src_file, dst_file)

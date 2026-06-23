@@ -47,7 +47,8 @@ if [ ! -d "$FOLD_DIR/train/mha/input" ] || [ $(ls "$FOLD_DIR/train/mha/input/"*.
         --splits_csv $SPLITS_CSV \
         --data_dir $PROJ/data_split_v4/train/mha \
         --output_dir $FOLD_DIR \
-        --fold $FOLD
+        --fold $FOLD \
+        --train_only_sources LABREAST
 fi
 
 echo "Fold $FOLD: train=$(ls $FOLD_DIR/train/mha/input/*.mha | wc -l), test=$(ls $FOLD_DIR/test/mha/input/*.mha | wc -l)"
