@@ -802,3 +802,46 @@ v20 用 Dataset920 (distilled 2D，从 Dataset932 3D 蒸馏而来) 生成训练 
 **状态**: ⏳ 待训练
 
 **后续**: 若 12 blocks 有效，可叠加 ngf=96（方案3）进一步提升。
+
+---
+
+## 19. v23: Local Enhancer 全分辨率精修
+
+**动机**: v20 的 GlobalGenerator 在 32×32 bottleneck 做合成，高频细节（tumor 边界、组织纹理）受限于 4 次下采样的信息损失。Local Enhancer 在全分辨率（512→256→512）上精修，只做 1 次下采样。
+
+**架构**:
+```
+Input 512×512 ─┬─ AvgPool ─→ 256×256 → [v20 Global (冻结)] → 256×256 features
+               │                                                      │
+               └─ [浅层encoder ×1] → 256×256 features ─────────────── ⊕
+                                                                      │
+                                                   [3 ResBlocks] → [upsample] → 512×512 output
+```
+
+**配置** (对比 v20):
+| 参数 | v20 | v23 |
+|------|-----|-----|
+| netG | global | local |
+| ngf | 64 | 32 (内部 global = 64) |
+| n_local_enhancers | - | 1 |
+| n_blocks_local | - | 3 |
+| niter_fix_global | - | 20 |
+| load_pretrain | - | mamasynth_v20 |
+| batchSize | 8 | 4 |
+| 其余参数 | 同 v20 | 同 v20 |
+
+**代码改动**:
+- `networks.py`: `LocalEnhancer` 支持 `residual_mode`（输出 = input + delta）
+- 脚本: `berzelius_train_v23_local_enhancer.sh`
+
+**训练策略**:
+- Epoch 1-20: 冻结 Global（用 v20 权重），只训 Local 层
+- Epoch 21-200: 解冻全网络，端到端 fine-tune
+
+**预期效果**:
+- 高频细节改善 → LPIPS ↓, SSIM ↑
+- Tumor 边界更锐利 → Dice ↑, HD95 ↓
+- 确定性 forward（不像 SDEdit 有随机性），不会降低结构一致性
+- 推理额外耗时 < 0.5s
+
+**状态**: ⏳ 待训练
