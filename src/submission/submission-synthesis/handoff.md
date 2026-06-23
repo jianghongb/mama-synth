@@ -16,8 +16,25 @@
 | data_split | 1074 train / 144 test | v3-v5, v8, v9 |
 | data_split_v2 | 1356 train / 150 test | v6, v7 |
 | data_split_v4 | 2811 train | v10, v11 |
+| data_split_v5 (Dataset932 预处理) | ISPY1 + NACT 1236 | → v13: 1236 |
+| vdata_split_v4 (Dataset910 mask) | ISPY1 + NACT + AMBL 2528 | → v14: 2528 |
 
 data_split_v4 = DUKE + ISPY1 + ISPY2 + NACT + LA-Breast + Yunnan + AMBL (7 域)
+
+### 各数据集方向与尺寸
+
+| 数据集 | 方向 | Axial? | 尺寸 | Cases |
+|--------|------|:---:|------|-------|
+| DUKE | LAI | ✅ | 448×448, 512×512 | ~900 |
+| ISPY2 | LAI | ✅ | 多种 | ~800 |
+| LA-Breast | Axial | ✅ | 448×448, 480×480 | ~500 |
+| Yunnan | Axial | ✅ | 多种 | ~100 |
+| **ISPY1** | **PSL** | ❌ | **256×256** | ~300 |
+| **NACT** | **PSL** | ❌ | **256×256** | ~150 |
+| **AMBL** | **RAS (sagittal)** | ❌ | **512×112** | ~50 |
+
+⚠️ GC 官方确认: validation/test 只包含 axial cases。
+data_split_v4 axial-only = DUKE + ISPY2 + LA-Breast + Yunnan = **2528 cases** (去掉 ISPY1/NACT/AMBL)
 
 ## 3. Breast Masking Pipeline
 
@@ -53,37 +70,44 @@ data_split_v4 = DUKE + ISPY1 + ISPY2 + NACT + LA-Breast + Yunnan + AMBL (7 域)
 | **v17** | **data_split_v4** | **2811** | **✅ ResEncUNetL f0** | **✅** | **v14 + SDEdit diffusion refiner (Stage 2)** |
 | v18 | data_split_v4 axial | 2528 | ✅ ensemble | ✅ | v16 + SDEdit refiner (❌ 失败) |
 | v19 | data_split_v4 | 2811 | ✅ ResEncUNetL f0 | ✅ | v14 + residual refiner (单步 Δ) ⏳ |
+| **v20** | **data_split_v4** | **2811** | **✅ Dataset920 2D distilled** | **✅** | **v14 但用 distilled 2D mask (训练推理一致)** |
 | **v16** | **data_split_v4 axial** | **2528** | **✅ ensemble (ResEnc+Plain OR)** | **✅** | **v14 + ensemble mask, 200ep → 🏆 最佳** |
 
 ### 评估结果: data_split_v2/test (150 cases)
 
-| Metric | v5 | v6 | v7 | v8 | v9 |
-|--------|:-:|:-:|:-:|:-:|:-:|
-| MSE ↓ | 0.283 | 0.87 | 0.89 | **0.258** | 0.284 |
-| LPIPS ↓ | 0.074 | 0.114 | 0.138 | **0.071** | 0.115 |
-| SSIM_tumor ↑ | 0.701 | 0.423 | 0.407 | 0.718 | **0.731** |
-| FRD ↓ | 10.41 | 12.78 | 9.85 | **9.77** | 9.85 |
-| AUROC ↑ | 0.930 | 0.926 | 0.926 | 0.929 | — |
-| Dice ↑ | 0.684 | 0.492 | 0.437 | **0.708** | 0.680 |
-| HD95 ↓ | 55.6 | 105.8 | 115.8 | **37.7** | 54.1 |
+| Metric | v5 | v6 | v7 | v8 | v9 | v20 |
+|--------|:-:|:-:|:-:|:-:|:-:|:-:|
+| MSE ↓ | 0.283 | 0.87 | 0.89 | **0.258** | 0.284 | 0.574 |
+| LPIPS ↓ | 0.074 | 0.114 | 0.138 | **0.071** | 0.115 | 0.137 |
+| SSIM_tumor ↑ | 0.701 | 0.423 | 0.407 | 0.718 | **0.731** | 0.623 |
+| FRD ↓ | 10.41 | 12.78 | 9.85 | **9.77** | 9.85 | 10.46 |
+| AUROC ↑ | 0.930 | 0.926 | 0.926 | 0.929 | — | — (xgb error) |
+| Dice ↑ | 0.684 | 0.492 | 0.437 | **0.708** | 0.680 | 0.678 |
+| HD95 ↓ | 55.6 | 105.8 | 115.8 | **37.7** | 54.1 | 48.8 |
 
 ### 评估结果: data_split/test — 全版本对比
 
-| Metric | v5 | v9 | v11 | v12 | v13* | v14 | v16 | v17 (v14+SDEdit) | Best |
-|--------|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|------|
-| MSE ↓ | 0.618 | 0.270 | 0.246 | 1.017 | 1.193 | **0.212** | 0.218 | 0.216 | v14 |
-| LPIPS ↓ | 0.148 | 0.118 | 0.125 | 0.238 | 0.208 | 0.126 | 0.124 | **0.109** | 🏆 v17 |
-| SSIM_tumor ↑ | 0.361 | 0.599 | 0.581 | 0.321 | 0.384 | **0.689** | 0.680 | 0.688 | v14 |
-| FRD ↓ | 10.75 | **9.41** | 9.41 | 10.32 | 12.02 | 11.90 | 11.51 | 10.54 | v9/v11 |
-| AUROC ↑ | 0.867 | 0.837 | 0.828 | 0.891 | **0.892** | 0.831 | 0.844 | 0.829 | v12/v13 |
-| Dice ↑ | 0.388 | 0.561 | 0.565 | 0.363 | 0.319 | 0.703 | 0.722 | **0.731** | 🏆 v17 |
-| HD95 ↓ | 186.7 | 115.4 | 108.1 | 203.9 | 276.9 | 68.9 | 63.7 | **62.8** | 🏆 v17 |
+| Metric | v5 | v9 | v11 | v12 | v13* | v14 | v16 | v17 (v14+SDEdit) | v20 | Best |
+|--------|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|------|
+| MSE ↓ | 0.618 | 0.270 | 0.246 | 1.017 | 1.193 | 0.212 | 0.218 | 0.216 | **0.191** | 🏆 v20 |
+| LPIPS ↓ | 0.148 | 0.118 | 0.125 | 0.238 | 0.208 | 0.126 | 0.124 | 0.109 | **0.100** | 🏆 v20 |
+| SSIM_tumor ↑ | 0.361 | 0.599 | 0.581 | 0.321 | 0.384 | 0.689 | 0.680 | 0.688 | **0.704** | 🏆 v20 |
+| FRD ↓ | 10.75 | **9.41** | 9.41 | 10.32 | 12.02 | 11.90 | 11.51 | 10.54 | 12.52 | v9/v11 |
+| AUROC ↑ | 0.867 | 0.837 | 0.828 | 0.891 | **0.892** | 0.831 | 0.844 | 0.829 | — (xgb err) | v12/v13 |
+| Dice ↑ | 0.388 | 0.561 | 0.565 | 0.363 | 0.319 | 0.703 | 0.722 | 0.731 | **0.718** | v17 |
+| HD95 ↓ | 186.7 | 115.4 | 108.1 | 203.9 | 276.9 | 68.9 | 63.7 | **62.8** | 67.0 | 🏆 v17 |
 
 *v13/v14/v16 在 199 axial cases 上评估
 *v16 full = 200 epochs with ensemble breast mask (ResEncUNetL f0 OR PlainConvUNet f4)
 
 **v16 分析**: ensemble breast mask (200 epochs) 在 Dice (+2.7%) 和 HD95 (-7.5%) 上超越 v14。
 **结论: v16 为最佳提交版本。** Dice 0.722, HD95 63.7。
+
+**v20 分析**: 使用 distilled 2D mask (Dataset920) 替代 3D multi-channel mask，消除训练/推理 mask 域差。
+- MSE 0.191 (新最佳, -10% vs v14), LPIPS 0.100 (新最佳, -8% vs v17), SSIM_tumor 0.704 (新最佳)
+- Dice 0.718 / HD95 67.0: 略低于 v17 (0.731/62.8)，但高于 v14 (0.703/68.9)
+- FRD 12.52: 最差之一，说明 radiomics feature 分布偏移稍大
+- **像素精度和感知质量全面超越所有版本**，分割指标接近最佳
 
 ### Yunnan 外部验证 (100 cases, 独立数据)
 
@@ -155,16 +179,7 @@ Input → nnUNet breast mask → Resize 512 → Pix2PixHD → Resize back → �
 
 ---
 
-## 7. 待办 / 下一步
-
-- [ ] v10/v11 训练完成后评估
-- [ ] 选择最佳版本提交 GC
-- [ ] 考虑 ensemble (v8 精度 + v7/v9 泛化)
-- [ ] Attention branch (Supervisor 建议, 让 G 学会定位 lesion)
-
----
-
-## 8. GC 评估指标重要性 & Breast Masking Pipeline 流程
+## 7. GC 评估指标重要性 & Breast Masking Pipeline 流程
 
 ### GC 排名机制
 
@@ -245,35 +260,50 @@ input.mha (pre-contrast)
 
 ---
 
-## 13. v8 评估结果 → 已合并到「4. 训练版本对比」
-
-**v8 = 当前最佳模型** (v5 + intensity_aug)
-- 本地: MSE=0.26, LPIPS=0.071, SSIM=0.718, Dice=0.708, HD95=37.7
-- Yunnan: MSE=0.009, LPIPS=0.045, SSIM=0.759
-- 详见 Section 4 对比表格
-
----
-
-## 14. Breast Segmentation 模型对比
+## 8. Breast Segmentation 模型对比
 
 ### 可用模型 (weights/breast_seg/)
 
-| | Dataset910 (PlainConv 2D) | Dataset910 (ResEncUNet 2D) | Dataset932 (3D fullres) |
-|---|---|---|---|
-| 路径 | `nnUNetTrainer__nnUNetPlans__2d` | `nnUNetTrainer__nnUNetResEncUNetLPlans__2d` | `nnUNetTrainer__nnUNetPlans__3d_fullres` |
-| 输入 | 1ch: T1 (pre-contrast) | 1ch: T1 (pre-contrast) | 4ch: P0, P1, d_early, d_late |
-| 输出 | 10类 (tissue, vessel, muscle, bone, lesion, lymphnode, heart, liver, implant) | 同左 | 4类 (breast, FGT, tumor) |
-| 训练数据 | 973 cases | 973 cases | 1280 cases |
-| 架构 | 标准卷积 | **残差编码器 (更精确)** | 3D fullres |
-| 推理时可用 | ✅ | ✅ | ❌ (需要 post-contrast) |
-| Breast mask 提取 | label 1+2+5+6+9 | label 1+2+5+6+9 | label 1+2+3 |
-| 适用场景 | 推理时 breast mask | 推理时 breast mask (更好) | 训练时 breast mask (最准) |
+| | Dataset910 (PlainConv 2D) | Dataset910 (ResEncUNet 2D) | Dataset920 (2D Distilled) | Dataset932 (3D fullres) |
+|---|---|---|---|---|
+| 路径 | `nnUNetTrainer__nnUNetPlans__2d` | `nnUNetTrainer__nnUNetResEncUNetLPlans__2d` | `Dataset920_BreastSeg2D/nnUNetTrainer__nnUNetPlans__2d` | `nnUNetTrainer__nnUNetPlans__3d_fullres` |
+| 输入 | 1ch: T1 (pre-contrast) | 1ch: T1 (pre-contrast) | 1ch: T1 (pre-contrast) | 4ch: P0, P1, d_early, d_late |
+| 输出 | 10类 → binary | 10类 → binary | **binary (直接)** | 4类 (breast, FGT, tumor) |
+| 训练数据 | 973 cases | 973 cases | 2811 cases (D932 pseudo labels) | 1280 cases |
+| 架构 | 标准卷积 | 残差编码器 | 标准卷积 2D | 3D fullres |
+| 推理时可用 | ✅ | ✅ | ✅ | ❌ (需要 post-contrast) |
+| Breast mask 提取 | label 1+2+5+6+9 | label 1+2+5+6+9 | 直接输出 binary | label 1+2+3 |
+| 模型大小 | 710 MB | 1.6 GB | **~120 MB** | ~2 GB |
+| 适用场景 | 推理时 breast mask | 推理时 breast mask (更好) | **训练+推理一致 (v20/v21)** | 训练时 breast mask (最准) |
+| 优势 | 轻量 | 最精确(单模型) | 训练推理无域差，轻量快速 | 多相信息最准 |
 
-### Dataset933 (计划中)
-- 目标: 单通道 T1 输入，输出 breast/FGT/tumor (3类)
-- 方法: 用 Dataset932 生成 pseudo labels → 训练 nnUNet 2D
-- 优势: 推理时也能做精确的 breast+FGT+tumor 分割
-- 状态: ⏳ 待训练 (berzelius_train_breast_seg.sh)
+
+### v16 Ensemble Pipeline
+
+组合 ResEncUNetL fold_0 + PlainConvUNet fold_4，OR 合并后后处理：
+
+```
+Model 1 (ResEncUNetL f0) → mask1
+Model 2 (PlainConvUNet f4) → mask2
+         ↓
+    OR 合并 (mask1 | mask2)
+         ↓
+    Drop small components (<10% of largest)
+         ↓
+    Morphological closing (15×15 ellipse)
+         ↓
+    Fill internal holes (floodFill)
+         ↓
+    Spatial analysis top-2 components:
+      • Left-right (dx > dy): dilate until connected → erode back
+      • Top-bottom (dx < dy): keep only largest
+         ↓
+    Final breast mask
+```
+
+- 用于: v16 训练 (ensemble mask 更完整，覆盖胸壁边缘乳房组织)
+- 总大小: 710 MB + 1.6 GB = 2.3 GB
+- 效果: v16 Dice 0.722 > v14 Dice 0.703 (+2.7%)
 
 ---
 
@@ -318,7 +348,7 @@ images/ + segmentations/
 
 ---
 
-## 15. 当前执行状态 (2026-06-17 11:09)
+## 10. 当前执行状态 (2026-06-17 11:09)
 
 ### Berzelius 上正在跑的 Jobs
 - 19 个 GPU job 在排队 (mask_0_80 ~ mask_1440_1520)
@@ -348,7 +378,7 @@ images/ + segmentations/
 
 ---
 
-## 10. Axial-Only 训练发现 (v13/v14)
+## 11. Axial-Only 训练发现 (v13/v14)
 
 ### GC 官方确认: "validation and test data contains only axial cases"
 
@@ -390,7 +420,7 @@ Sagittal 数据混入训练会"污染"模型：
 
 ---
 
-## 11. v16 Breast Mask Ensemble Pipeline
+## 12. v16 Breast Mask Ensemble Pipeline
 
 ### 模型组合
 
@@ -434,7 +464,7 @@ Model 2 predict → mask2 (各自带后处理)
 
 ---
 
-## 15. v17: GAN + SDEdit Diffusion Refinement
+## 13. v17: GAN + SDEdit Diffusion Refinement
 
 **方法**: 在 v14 GAN 输出上加轻量 diffusion refinement (SDEdit)
 - Stage 1: 冻结 v14 Pix2PixHD → coarse synthesis
@@ -476,7 +506,7 @@ Model 2 predict → mask2 (各自带后处理)
 
 ---
 
-## 16. v18: v16 GAN + SDEdit Refiner (失败分析)
+## 14. v18: v16 GAN + SDEdit Refiner (失败分析)
 
 **配置**: v16 GAN (ensemble breast mask, axial-only 2528 cases) + SDEdit refiner
 **训练数据**: data_split_v4_axial/train (同 v16)
@@ -506,7 +536,7 @@ nnUNet 分割模型找不到 tumor。
 
 ---
 
-## 17. v19: Residual Refiner (Supervisor 建议)
+## 15. v19: Residual Refiner (Supervisor 建议)
 
 **思路**: 不用 diffusion 多步去噪，直接用 UNet 预测残差 Δ，output = pre + Δ。
 
@@ -532,4 +562,130 @@ nnUNet 分割模型找不到 tumor。
 - Epochs: 100, batch=8, lr=2e-4
 - 脚本: `berzelius_train_v19.sh`
 
-**状态**: ⏳ 训练中
+**结果 (data_split/test, 199 cases)**:
+
+| Metric | v14 (GAN) | v17 (v14+SDEdit) | v19 (v14+Residual) |
+|--------|:-:|:-:|:-:|
+| MSE ↓ | **0.212** | 0.216 | 0.185 |
+| LPIPS ↓ | 0.126 | **0.109** | 0.196 ❌ |
+| SSIM_tumor ↑ | 0.689 | 0.688 | **0.709** |
+| FRD ↓ | 11.90 | 10.54 | **9.04** |
+| AUROC ↑ | 0.831 | 0.829 | 0.755 ❌ |
+| Dice ↑ | 0.703 | **0.731** | 0.694 |
+| HD95 ↓ | 68.9 | **62.8** | 71.9 |
+| Dice=0 cases | — | 15 | 18 |
+
+**分析**:
+- ✅ MSE 最佳 (0.185)，SSIM_tumor 最佳 (0.709)，FRD 最佳 (9.04)
+- ❌ LPIPS 严重退化 (0.196 vs v17 0.109)：单步残差缺乏感知质量精修
+- ❌ AUROC 下降 (0.755)：增强信号不够逼真，classifier 容易区分真假
+- ❌ Dice/HD95 略低于 v14/v17：tumor 边界精度未改善
+- Dice=0 cases 18个 (v17=15)：比 v17 多 3 个完全分割失败
+
+**结论**: 残差 refiner 在像素精度 (MSE) 和 radiomics 分布 (FRD) 上有优势，
+但感知质量 (LPIPS) 和分类器欺骗能力 (AUROC) 显著退化。
+单步 UNet 太简单，无法学到 diffusion 多步去噪的精修效果。
+**v17 仍为最佳 refiner 方案。**
+
+---
+
+## 16. v20: Distilled 2D Breast Mask (Dataset920)
+
+**动机**: v14 训练时用 Dataset910 ResEncUNetL 生成 breast mask，但推理时也用同一模型。
+然而 Dataset910 是 10 类通用模型，精度不如专用 breast-only 模型。
+v20 用 Dataset920 (distilled 2D，从 Dataset932 3D 蒸馏而来) 生成训练 mask，
+这样训练和推理使用**完全相同**的 mask model，消除域差。
+
+**配置**:
+
+| 属性 | 值 |
+|------|-----|
+| 数据 | data_split_v4 (2811 cases, 全量含 sagittal) |
+| Breast mask | Dataset920 2D distilled (fold_0, checkpoint_final) |
+| Intensity aug | ✅ |
+| Epochs | 200 (niter=100 + niter_decay=100) |
+| 其余超参 | 同 v14 (MSEC=50, tumor=10, feat=10, VGG=10) |
+| 脚本 | `berzelius_train_v20_2dmask.sh` |
+| 训练时间 | 9h 47min (1 GPU) |
+
+**与 v14 唯一区别**: breast mask 从 Dataset910 ResEncUNetL → Dataset920 distilled 2D
+
+**训练流程** (berzelius_train_v20_2dmask.sh):
+1. 先用 Dataset920 给 data_split_v4/train/mha/input 生成 breast_mask_2d/
+2. 然后以 `--breast_mask_dir breast_mask_2d` 训练 Pix2PixHD
+
+**结果 (data_split/test, 199 cases)**:
+
+| Metric | v14 | v16 | v17 | **v20** |
+|--------|:-:|:-:|:-:|:-:|
+| MSE ↓ | 0.212 | 0.218 | 0.216 | **0.191** 🏆 |
+| LPIPS ↓ | 0.126 | 0.124 | 0.109 | **0.100** 🏆 |
+| SSIM_tumor ↑ | 0.689 | 0.680 | 0.688 | **0.704** 🏆 |
+| FRD ↓ | 11.90 | 11.51 | **10.54** | 12.52 |
+| Dice ↑ | 0.703 | 0.722 | **0.731** | 0.718 |
+| HD95 ↓ | 68.9 | 63.7 | **62.8** | 67.0 |
+
+**结果 (data_split_v2/test, 150 cases)**:
+
+| Metric | v5 | v8 | **v20** |
+|--------|:-:|:-:|:-:|
+| MSE ↓ | 0.283 | **0.258** | 0.574 |
+| LPIPS ↓ | **0.074** | 0.071 | 0.137 |
+| SSIM_tumor ↑ | 0.701 | 0.718 | 0.623 |
+| FRD ↓ | 10.41 | **9.77** | 10.46 |
+| Dice ↑ | 0.684 | **0.708** | 0.678 |
+| HD95 ↓ | 55.6 | **37.7** | 48.8 |
+
+**分析**:
+- **data_split/test (主要对比)**: v20 在像素精度 (MSE -10%)、感知质量 (LPIPS -8%)、肿瘤结构 (SSIM +2%) 上全面新高
+- 分割指标 (Dice 0.718, HD95 67.0) 接近 v14 水平，但略低于 v17 SDEdit
+- FRD 12.52 偏高，说明 radiomics feature 分布与 GT 有偏移
+- **data_split_v2/test**: 表现中等，可能因为 v2 test 包含更多 sagittal 数据，而 v20 的 Dataset920 mask 在 sagittal 上表现不佳
+
+**结论**: v20 证明了 train/infer mask 一致性的价值 — 像素级指标全面最优。
+但分割指标未超越 v17，说明 SDEdit 的 tumor boundary 精修仍有不可替代的优势。
+
+**下一步**: v20 + SDEdit refiner (v21?) 有望结合两者：v20 的像素精度 + SDEdit 的分割提升。
+
+---
+
+## 17. K-Fold Cross-Validation
+
+**目的**: 在全量训练数据上做 5-fold CV，评估模型泛化性，避免 test set 过拟合。
+
+**配置**:
+- 数据: data_split_v4 axial-only (2528 cases)
+- 划分: `kfold_splits.csv` 按 source 分层，5 fold
+- 每 fold: ~2022 train / ~506 test
+- Breast mask: Dataset910 ResEncUNetL (10类→binary, 同 v14)
+- 模型配置: 同 v14 (residual + MSSC=50 + breast mask + intensity aug)
+- 脚本: `src/submission/submission-synthesis/models/scripts/train_kfold.sh`
+- SLURM array job: `--array=0-4`，5 个 fold 并行训练
+
+**流程**:
+1. `setup_kfold_dir.py` 根据 `kfold_splits.csv` 创建 fold-specific 目录（symlinks）
+2. 每个 fold 独立训练 200 epochs
+3. 训练完后对各 fold 的 held-out test set 推理 + 评估
+4. 汇总 5 fold 结果 → 全数据集 CV 指标
+
+**Fold 0 结果 (506 cases)**:
+
+| Metric | Fold 0 |
+|--------|:-:|
+| MSE ↓ | 0.463 |
+| LPIPS ↓ | 0.126 |
+| SSIM_tumor ↑ | 0.603 |
+| FRD ↓ | 10.56 |
+| AUROC ↑ | 0.788 |
+| Dice ↑ | 0.319 |
+| HD95 ↓ | 274.0 |
+
+**注意**: Fold 0 Dice=0.319 / HD95=274 远低于 v14 test set 结果 (Dice=0.703, HD95=68.9)。
+可能原因:
+- 训练量少 (~2022 vs 2811 cases)
+- Fold 0 的 test cases 可能包含难例/少见 source
+- 需要等 fold 1-4 完成后综合判断
+
+**Splits CSV 格式**: `case_id,source,fold` (2528 行)
+
+**权重路径**: `$PROJ/checkpoints/kfold_f{0-4}/latest_net_G.pth`

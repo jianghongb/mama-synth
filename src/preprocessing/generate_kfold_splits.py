@@ -37,10 +37,12 @@ def main():
     parser.add_argument("--output_csv", default="kfold_splits.csv")
     parser.add_argument("--k", type=int, default=5)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--exclude_sources", default="", help="Comma-separated sources to exclude (e.g. LABREAST,AMBL)")
     args = parser.parse_args()
 
     data_dir = Path(args.data_dir)
     mask_dir = Path(args.mask_dir) if args.mask_dir else None
+    exclude = set(s.strip() for s in args.exclude_sources.split(",") if s.strip())
 
     # Get all case IDs
     all_files = sorted(data_dir.glob("*.mha"))
@@ -50,6 +52,11 @@ def main():
     if mask_dir and mask_dir.exists():
         case_ids = [c for c in case_ids if (mask_dir / f"{c}.mha").exists()]
         print(f"Filtered to {len(case_ids)} cases with tumor mask")
+
+    # Exclude specific data sources
+    if exclude:
+        case_ids = [c for c in case_ids if get_source(c) not in exclude]
+        print(f"After excluding {exclude}: {len(case_ids)} cases")
 
     # Group by source
     source_groups = defaultdict(list)
