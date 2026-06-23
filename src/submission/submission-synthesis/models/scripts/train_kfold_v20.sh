@@ -48,9 +48,6 @@ if [ ! -d "$FOLD_DIR/train/mha/input" ] || [ $(ls "$FOLD_DIR/train/mha/input/"*.
         --data_dir $PROJ/data_split_v4/train/mha \
         --output_dir $FOLD_DIR \
         --fold $FOLD
-    # Remove LABREAST (ellipse masks → Dice=0)
-    rm -f $FOLD_DIR/train/mha/*/LABREAST*.mha 2>/dev/null
-    rm -f $FOLD_DIR/test/mha/*/LABREAST*.mha 2>/dev/null
 fi
 
 echo "Fold $FOLD: train=$(ls $FOLD_DIR/train/mha/input/*.mha | wc -l), test=$(ls $FOLD_DIR/test/mha/input/*.mha | wc -l)"
