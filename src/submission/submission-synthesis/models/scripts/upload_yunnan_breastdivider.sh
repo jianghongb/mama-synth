@@ -30,10 +30,9 @@ for id in $(seq 1 100); do
     fi
 
     if [ -n "$P0" ]; then
-        padded=$(printf "%03d" "$id")
-        dest="$STAGING/YUNNAN_${padded}"
+        dest="$STAGING/YUNNAN_${id}"
         mkdir -p "$dest"
-        ln -s "$P0" "$dest/YUNNAN_${padded}_0000.nii.gz"
+        ln -s "$P0" "$dest/YUNNAN_${id}_0000.nii.gz"
         count=$((count+1))
     fi
 done
@@ -43,6 +42,11 @@ echo "  Staged $count cases"
 echo ""
 echo "=== Step 3: Upload to Berzelius images/ (~10 GB) ==="
 rsync -avPL "$STAGING/" ${REMOTE}:${PROJ}/images/
+
+echo ""
+echo "=== Step 4: Upload Yunnan report.csv ==="
+rsync -avP /Users/ehogjig/git/kth/yunnan_v2/report.csv \
+  ${REMOTE}:${PROJ}/yunnan_v2/report.csv
 
 echo ""
 echo "=== Done! Yunnan at: ${PROJ}/images/YUNNAN_001/ ... YUNNAN_100/ ==="

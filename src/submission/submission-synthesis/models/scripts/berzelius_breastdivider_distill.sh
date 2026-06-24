@@ -56,6 +56,7 @@ os.environ['nnUNet_results'] = '$PROJ/nnUNet_results'
 report_files = [
     '$PROJ/data_split_v4/train/report.csv',
     '$PROJ/data_split_v4/test/report.csv',
+    '$PROJ/yunnan_v2/report.csv',
 ]
 slice_map = {}  # patient_id -> selected_slice
 for rpath in report_files:
@@ -66,7 +67,12 @@ for rpath in report_files:
         reader = csv.DictReader(f)
         for row in reader:
             pid = row['patient_id']
-            slice_map[pid] = int(row['selected_slice'])
+            # Handle different column names
+            if 'selected_slice' in row:
+                slice_map[pid] = int(row['selected_slice'])
+            elif 'slice_idx' in row:
+                slice_map[pid] = int(row['slice_idx'])
+print(f'Loaded slice indices for {len(slice_map)} patients')
 print(f'Loaded slice indices for {len(slice_map)} patients')
 
 # Collect 3D volume paths
