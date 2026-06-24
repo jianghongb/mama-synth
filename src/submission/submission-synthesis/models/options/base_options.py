@@ -76,6 +76,7 @@ class BaseOptions():
         self.parser.add_argument('--breast_mask', action='store_true', help='mask out chest wall during training/inference')
         self.parser.add_argument('--breast_mask_thresh', type=float, default=-0.3, help='z-score threshold for breast tissue')
         self.parser.add_argument('--breast_mask_dir', type=str, default='', help='path to precomputed breast masks from nnUNet (overrides threshold method)')
+        self.parser.add_argument('--mask_as_input', action='store_true', help='concatenate breast mask as 2nd input channel to generator')
         self.parser.add_argument('--intensity_aug', action='store_true', help='random intensity scale/bias augmentation for generalization')
 
         self.initialized = True

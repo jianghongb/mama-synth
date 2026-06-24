@@ -143,7 +143,7 @@ class MhaDataset(BaseDataset):
                 breast_mask_t = breast_mask_t.flip(-1)
 
         return {
-            'label': input_t,
+            'label': torch.cat([input_t, breast_mask_t], dim=0) if getattr(self.opt, 'mask_as_input', False) else input_t,
             'inst': torch.zeros(1),
             'image': gt_t,
             'feat': torch.zeros(1),
