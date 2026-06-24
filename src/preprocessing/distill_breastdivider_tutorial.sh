@@ -44,16 +44,7 @@ mkdir -p $nnUNet_raw $nnUNet_preprocessed $nnUNet_results
 echo "=== Step 1: 准备输入 ==="
 mkdir -p $INPUT_3D
 
-# 从你自己的 images/ 创建 symlinks
-for dir in $BASE/images/*/; do
-    patient=$(basename $dir)
-    phase0="$dir/${patient}_0000.nii.gz"
-    if [ -f "$phase0" ]; then
-        ln -sf "$phase0" "$INPUT_3D/${patient}_0000.nii.gz"
-    fi
-done
-
-# 从 BreastDividerDataset 添加额外数据（提升泛化）
+# 使用 BreastDividerDataset（多中心、多模态 3D breast MRI）
 if [ -d "$BD_DATASET" ]; then
     for f in $BD_DATASET/imagesTr/*_0000.nii.gz; do
         [ -f "$f" ] && ln -sf "$f" "$INPUT_3D/$(basename $f)"
@@ -61,7 +52,6 @@ if [ -d "$BD_DATASET" ]; then
     for f in $BD_DATASET/imagesTs/*_0000.nii.gz; do
         [ -f "$f" ] && ln -sf "$f" "$INPUT_3D/$(basename $f)"
     done
-    echo "  Added BreastDividerDataset images"
 fi
 
 echo "  输入文件: $(ls $INPUT_3D/*.nii.gz 2>/dev/null | wc -l)"
@@ -102,59 +92,44 @@ echo "  Pseudo labels: $(ls $PSEUDO_3D/*.nii.gz 2>/dev/null | wc -l)"
 
 echo "=== Step 3: 提取 2D slices ==="
 python3 << 'EOF'
-import json, numpy as np, nibabel as nib, SimpleITK as sitk
+import json, numpy as np, nibabel as nib
 from pathlib import Path
 
-pseudo_dir = Path("./distill_demo/pseudo_labels")
-dataset_dir = Path("./distill_demo/Dataset930")
+input_3d_dir = Path("/home/maia-user/jh/distill/input_3d")
+pseudo_dir = Path("/home/maia-user/jh/distill/pseudo_labels")
+dataset_dir = Path("/home/maia-user/jh/distill/Dataset930")
 images_dir = dataset_dir / "imagesTr"
 labels_dir = dataset_dir / "labelsTr"
 images_dir.mkdir(parents=True, exist_ok=True)
 labels_dir.mkdir(parents=True, exist_ok=True)
 
-# 你的 2D 数据目录（已经 preprocess 好的）
-mha_input_dir = Path("/home/maia-user/jh/data_split_v4/train/mha/input")  # 2D preprocessed data
-
 count = 0
-for mha_file in sorted(mha_input_dir.glob("*.mha")):
-    case_id = mha_file.stem
+for pseudo_file in sorted(pseudo_dir.glob("*.nii.gz")):
+    case_id = pseudo_file.stem.replace(".nii", "")
 
-    # 找对应的 3D pseudo label
-    pseudo_file = pseudo_dir / f"{case_id}.nii.gz"
-    if not pseudo_file.exists():
+    # 对应的 3D input image
+    input_file = input_3d_dir / f"{case_id}_0000.nii.gz"
+    if not input_file.exists():
         continue
 
-    # 加载 2D input
-    img_2d = sitk.GetArrayFromImage(sitk.ReadImage(str(mha_file))).squeeze()
-    h, w = img_2d.shape
-
-    # 加载 3D pseudo label
+    # 加载
+    img_3d = nib.load(str(input_file)).get_fdata().astype(np.float32)
     label_3d = nib.load(str(pseudo_file)).get_fdata()
 
-    # 找到和 2D shape 匹配的 axis，取中间 slice
-    label_2d = None
-    for axis in range(3):
-        sl_shape = tuple(s for i, s in enumerate(label_3d.shape) if i != axis)
-        if sl_shape == (h, w):
-            mid = label_3d.shape[axis] // 2
-            label_2d = np.take(label_3d, mid, axis=axis)
-            break
+    # 取 axial 中间 slice（最后一个 axis）
+    mid = img_3d.shape[2] // 2
+    img_2d = img_3d[:, :, mid]
+    label_2d = (label_3d[:, :, mid] > 0).astype(np.int16)
 
-    if label_2d is None:
-        # fallback: 最后一个 axis 的中间 slice
-        label_2d = label_3d[:, :, label_3d.shape[2] // 2]
-        # resize if needed
-        from PIL import Image
-        label_2d = np.array(Image.fromarray(label_2d.astype(np.float32)).resize((w, h), Image.NEAREST))
+    # 跳过没有 breast 的 slice
+    if label_2d.sum() < 100:
+        continue
 
-    # 二值化: >0 = breast
-    breast_mask = (label_2d > 0).astype(np.int16)
-
-    # 保存 (nnUNet 格式: 3D with single slice, shape = (1, H, W))
+    # 保存 (nnUNet 格式: shape = (1, H, W))
     affine = np.eye(4)
-    nib.save(nib.Nifti1Image(img_2d[np.newaxis].astype(np.float32), affine),
+    nib.save(nib.Nifti1Image(img_2d[np.newaxis], affine),
              str(images_dir / f"{case_id}_0000.nii.gz"))
-    nib.save(nib.Nifti1Image(breast_mask[np.newaxis], affine),
+    nib.save(nib.Nifti1Image(label_2d[np.newaxis], affine),
              str(labels_dir / f"{case_id}.nii.gz"))
     count += 1
 
