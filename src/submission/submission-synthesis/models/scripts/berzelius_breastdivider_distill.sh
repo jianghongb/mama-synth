@@ -54,6 +54,7 @@ os.environ['nnUNet_results'] = '$PROJ/nnUNet_results'
 
 # Read report.csv to get slice indices
 report_files = [
+    '$PROJ/mama-synth/output/report_merged.csv',
     '$PROJ/data_split_v4/train/report.csv',
     '$PROJ/data_split_v4/test/report.csv',
     '$PROJ/yunnan_v2/report.csv',
