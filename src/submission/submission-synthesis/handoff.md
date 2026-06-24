@@ -1073,3 +1073,30 @@ L_unc = mean[ ω × exp(-log σ²) × (μ - x)² + log σ² ]
 - 提供 uncertainty map 作为质量指标（可用于 ensemble selection）
 
 **状态**: ⏳ 待训练
+
+---
+
+## 21. v21_nomask: Bilateral Split + Full-Image Background
+
+**方法**: 乳房内部用 v21 bilateral GAN，乳房外部用 v20 全图 GAN（不用硬 mask composite）
+- 乳房分割: Dataset920
+- 乳房左右分别 → v21 GAN → stitch 回来
+- 胸壁区域: 用 v20 全图 GAN 输出填充（不是保留 pre-contrast）
+
+**结果 (data_split/test, 199 cases)**:
+
+| Metric | v14 | v16 full | v17 (SDEdit) | **v21_nomask** |
+|--------|:-:|:-:|:-:|:-:|
+| MSE ↓ | **0.212** | 0.218 | 0.216 | 0.347 |
+| LPIPS ↓ | 0.126 | 0.124 | **0.109** | 0.136 |
+| SSIM ↑ | 0.689 | 0.680 | 0.688 | **0.790** 🏆 |
+| Dice ↑ | 0.703 | 0.722 | **0.731** | 0.715 |
+| HD95 ↓ | 68.9 | 63.7 | **62.8** | 62.9 |
+
+**分析**:
+- SSIM 0.790 是所有单模型版本中最高（+15% vs v17）— bilateral split 让 tumor ROI 结构更精准
+- HD95 62.9 和 v17 持平
+- MSE 偏高 (0.347) — 可能是 bilateral stitch 接缝处的 artifact
+- Dice 0.715 > v14，接近 v16
+
+**结论**: Bilateral split 对 SSIM_tumor 贡献巨大，但 MSE 代价较高。适合 ensemble 或作为 SSIM 指标的优化方向。
