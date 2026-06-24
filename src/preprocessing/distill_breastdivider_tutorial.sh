@@ -19,6 +19,7 @@ set -e
 # === 路径配置 (MAIA) ===
 BASE="/home/maia-user/jh"
 MODEL_DIR="$BASE/BreastDividerModel"
+BD_DATASET="$BASE/BreastDividerDataset"    # 下载的额外数据集（提升泛化）
 INPUT_3D="$BASE/distill/input_3d"
 PSEUDO_3D="$BASE/distill/pseudo_labels"
 DATASET_DIR="$BASE/distill/Dataset930"
@@ -43,14 +44,25 @@ mkdir -p $nnUNet_raw $nnUNet_preprocessed $nnUNet_results
 echo "=== Step 1: 准备输入 ==="
 mkdir -p $INPUT_3D
 
-# 示例：从 images/ 创建 symlinks
-# for dir in $BASE/images/*/; do
-#     patient=$(basename $dir)
-#     phase0="$dir/${patient}_0000.nii.gz"
-#     if [ -f "$phase0" ]; then
-#         ln -sf "$phase0" "$INPUT_3D/${patient}_0000.nii.gz"
-#     fi
-# done
+# 从你自己的 images/ 创建 symlinks
+for dir in $BASE/images/*/; do
+    patient=$(basename $dir)
+    phase0="$dir/${patient}_0000.nii.gz"
+    if [ -f "$phase0" ]; then
+        ln -sf "$phase0" "$INPUT_3D/${patient}_0000.nii.gz"
+    fi
+done
+
+# 从 BreastDividerDataset 添加额外数据（提升泛化）
+if [ -d "$BD_DATASET" ]; then
+    for f in $BD_DATASET/imagesTr/*_0000.nii.gz; do
+        [ -f "$f" ] && ln -sf "$f" "$INPUT_3D/$(basename $f)"
+    done
+    for f in $BD_DATASET/imagesTs/*_0000.nii.gz; do
+        [ -f "$f" ] && ln -sf "$f" "$INPUT_3D/$(basename $f)"
+    done
+    echo "  Added BreastDividerDataset images"
+fi
 
 echo "  输入文件: $(ls $INPUT_3D/*.nii.gz 2>/dev/null | wc -l)"
 
