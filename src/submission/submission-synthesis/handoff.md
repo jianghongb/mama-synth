@@ -197,6 +197,94 @@ v3 Mean Position ≈ 16.1
 
 ---
 
+## 5c. BreastDivider 3D 模型 — 蒸馏方案
+
+### 模型介绍
+
+**BreastDivider** (MICCAI 2025 WOMEN) 是目前最大规模的乳腺 MRI 分割模型：
+
+| 属性 | BreastDivider | Dataset920 (当前用) | Dataset910 (v14用) |
+|------|:-:|:-:|:-:|
+| 维度 | **3D** (128³ patch) | 2D | 2D |
+| 训练数据 | **13,752** 3D scans | ~973 cases | ~973 cases |
+| 输出 | 3类: bg/left/right | binary breast | 10类 |
+| 模态泛化 | T1, T1+C, T2, FLAIR, DWI | T1 only | T1 only |
+| 权重大小 | 100 MB | ~350 MB | 1.6 GB |
+| 架构 | PlainConvUNet 3D, 6 stages | PlainConvUNet 2D | ResEncUNetL 2D |
+| Spacing | 1.64×2.62×2.66 mm | 1×1 mm | 1×1 mm |
+
+来源: Rokuss et al., arXiv:2507.13830, CC BY-NC-SA 4.0
+权重: `/Users/ehogjig/git/kth/BreastDividerModel/` (HuggingFace)
+
+### 为什么不能直接用于 GC
+
+GC 输入是**单张 2D slice** (.mha)，BreastDivider 需要完整 3D volume。单张 slice 无法满足 3D 卷积的 z 维度需求。Pseudo-3D (复制 slice) 无效 — 3D 卷积在 z 方向学的是解剖连续性，重复帧没有这个信息。
+
+### 蒸馏方案
+
+```
+原始 3D volumes (Berzelius)
+        │
+        ▼
+BreastDivider (3D) → 高质量 breast mask (left=1, right=2)
+        │
+        ▼ 取对应 2D slice (preprocess 选的那层)
+        │
+2D pseudo labels
+        │
+        ▼
+训练 nnUNet 2D student (Dataset930_BreastDivider2D)
+        │
+        ▼
+推理时使用 2D student (只需单张 slice)
+```
+
+### 可用数据源
+
+| 数据集 | 3D volumes 位置 | Cases | 可用 |
+|--------|----------------|-------|:---:|
+| DUKE | `/proj/.../images/DUKE_*/DUKE_*_0000.nii.gz` | ~900 | ✅ |
+| ISPY2 | `/proj/.../images/ISPY2_*/...` | ~1000+ | ✅ |
+| Yunnan | `/Users/ehogjig/Downloads/8068383/*/P0.nii.gz` | 100 | ✅ |
+| LA-Breast | Berzelius | ~300 | ✅ |
+
+### 本地验证 (Yunnan)
+
+- Input: 896×896×120, spacing 0.38×0.38×1.7 mm
+- CPU 推理时间: **~2 min/case**
+- 输出: labels {0: background, 1: left breast, 2: right breast}
+- Yunnan 自带 `Breast_mask.nii.gz` 可做质量对比
+
+### 速度估算
+
+| 环境 | 时间/case | 全量 (~2800 cases) |
+|------|:-:|:-:|
+| 本地 CPU | ~2 min | ~93 小时 ❌ |
+| Berzelius GPU (A100) | ~5-10 sec | **~30 分钟** ✅ |
+
+### 蒸馏优势 vs 当前 Dataset920
+
+1. **训练数据量 14x** (13,752 vs 973) → 更鲁棒的 teacher
+2. **多模态泛化** → 对 Test A (Siemens 3T, fat-sat) 可能更好
+3. **Left/right 分离** → bilateral split 更精确
+4. **3D 上下文** → 比纯 2D 分割的边界更准
+
+### 执行计划
+
+1. 上传 BreastDivider 权重到 Berzelius (~100 MB)
+2. 对 data_split_v4 所有 cases 的 pre-contrast 3D volumes 跑推理
+3. 从 report.csv 获取 slice index → 取对应 2D mask
+4. 训练 nnUNet 2D student
+5. 用 student 替换 Dataset920 → 重新训练 GAN (v22?)
+
+### 注意事项
+
+- License: CC BY-NC-SA 4.0 — 学术用途 OK，商业需注意
+- 需要确认 preprocess 记录了 slice index (report.csv 中应该有)
+- 如果 report.csv 缺少 slice index，需重新跑 preprocess 记录
+
+---
+
 ## 6. Docker 提交
 
 ```
@@ -910,3 +998,23 @@ v24: concat(pre-contrast, breast_mask) (2ch) → Generator(input_nc=2) → delta
 - Dice/HD95 可能提升（增强不溢出到胸壁）
 
 **状态**: ⏳ 待训练
+
+---
+
+## TODO: K-Fold v20b (进行中)
+
+**目标**: 修复 v20 kfold breast mask 生成失败问题，重新训练
+
+**配置**:
+- 训练数据: DUKE + ISPY2 + YUNNAN + LABREAST（全量 2528 cases）
+- 测试数据: 只用 DUKE + ISPY2 + YUNNAN（5% per fold，LABREAST 只训不测）
+- Breast mask: **Dataset920**（蒸馏 2D 模型，每 fold 重新生成确保不为空）
+- 其余: v20 配置 (MSEC=50, intensity_aug, 200 epochs)
+- 脚本: `train_kfold_v20b.sh`（SLURM array 0-4）
+- 输出: `$PROJ/checkpoints/kfold_v20b_f{0-4}/latest_net_G.pth`
+
+**完成后**:
+- [ ] 下载 5 个 fold 权重
+- [ ] 跑 ensemble inference + evaluate
+- [ ] 对比 v14 kfold ensemble (Dice 0.756) 是否提升
+- [ ] 更新 handoff 结果表
