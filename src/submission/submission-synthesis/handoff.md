@@ -872,3 +872,41 @@ Input 512×512 ─┬─ AvgPool ─→ 256×256 → [v20 Global (冻结)] → 2
 
 **局限**: 推理时间 ×4（需要跑 4 个模型），但仍在 T4 10min 限制内（~4s × 4 = ~16s）。
 **结论**: Ensemble 是当前最佳方案，适合作为最终提交。
+
+---
+
+## 21. v24: Breast Mask 作为条件输入 (Mask-as-Input)
+
+**动机**: v20 的 breast mask 仅用于 loss masking（告诉模型"别管背景"），但 Generator 本身看不到乳房边界。v24 把 breast mask 作为第 2 输入通道，让 Generator 有**显式的解剖先验**。
+
+**架构变化**:
+```
+v20: pre-contrast (1ch) → Generator(input_nc=1) → delta → output
+v24: concat(pre-contrast, breast_mask) (2ch) → Generator(input_nc=2) → delta → output
+```
+
+**配置** (对比 v20):
+| 参数 | v20 | v24 |
+|------|-----|-----|
+| input_nc | 1 | 2 |
+| --mask_as_input | - | ✅ |
+| breast_mask 用途 | loss masking only | **条件输入** + loss masking |
+| 推理依赖 | 无 | 需先跑 Dataset920 |
+| 其余参数 | - | 同 v20 |
+
+**代码改动**:
+- `base_options.py`: 新增 `--mask_as_input` flag
+- `mha_dataset.py`: `mask_as_input=True` 时 concat breast_mask 到 label
+- `networks.py`: 无改动（`input_nc=2` 自动适配第一层 Conv）
+- 脚本: `berzelius_train_v24_mask_input.sh`
+
+**推理流程**:
+1. pre-contrast → Dataset920 nnUNet → breast_mask
+2. concat(pre-contrast, breast_mask) → Generator → output
+
+**预期效果**:
+- Generator 知道乳房在哪 → 增强更精准，边界更清晰
+- 对不同 scanner/size 泛化更好（不依赖隐式学习乳房位置）
+- Dice/HD95 可能提升（增强不溢出到胸壁）
+
+**状态**: ⏳ 待训练
