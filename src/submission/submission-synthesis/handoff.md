@@ -1018,3 +1018,58 @@ v24: concat(pre-contrast, breast_mask) (2ch) → Generator(input_nc=2) → delta
 - [ ] 跑 ensemble inference + evaluate
 - [ ] 对比 v14 kfold ensemble (Dice 0.756) 是否提升
 - [ ] 更新 handoff 结果表
+
+---
+
+## 22. v25: Uncertainty-Aware Heteroscedastic Loss (SAFE-Diff 启发)
+
+**动机**: SAFE-Diff (Zhang et al., 2026, arXiv:2605.25767) 提出 heteroscedastic uncertainty loss，让网络自适应地对不同区域施加不同重建权重。确定区域强制精确重建，模糊区域（tumor 边界、异质组织）降低 loss 权重避免强行拟合噪声。
+
+**架构改动**:
+```
+GlobalGenerator (shared backbone up to ngf features)
+         │
+    ┌────┴────┐
+ mean_head   log_var_head (新增)
+    │              │
+   delta         log σ² (clamped [-1.5, 3.0])
+    │
+ output = input + delta
+```
+
+**Heteroscedastic Loss**:
+```
+L_unc = mean[ ω × exp(-log σ²) × (μ - x)² + log σ² ]
+
+空间权重 ω:
+  background = 1
+  breast     = 20  (via breast_mask)
+  tumor      = 1000 (via tumor mask)
+  归一化: ω = ω / mean(ω)
+```
+
+**配置** (对比 v20):
+| 参数 | v20 | v25 |
+|------|-----|-----|
+| --uncertainty | - | ✅ |
+| Generator 输出 | mu only | (mu, log_var) |
+| 额外参数 | - | ~0.1M (一个 7×7 Conv head) |
+| 推理 | 无变化 | 只用 mu，丢弃 log_var |
+| 其余参数 | - | 同 v20 |
+
+**代码改动**:
+- `networks.py`: `GlobalGenerator` 加 `uncertainty=True` → shared backbone + 2 heads
+- `pix2pixHD_model.py`: 新增 `loss_G_Unc` 计算，含空间加权
+- `base_options.py`: 新增 `--uncertainty` flag
+- 脚本: `berzelius_train_v25_uncertainty.sh`
+
+**参考 SAFE-Diff 的空间权重策略**:
+- 他们: background=1, breast=20, tumor=1000
+- 这比我们的 `tumor_weight=10` 激进得多，通过 uncertainty 机制自动平衡
+
+**预期效果**:
+- Tumor 边界质量提升 → Dice ↑, HD95 ↓
+- 减少对异质区域的过拟合 → LPIPS ↓
+- 提供 uncertainty map 作为质量指标（可用于 ensemble selection）
+
+**状态**: ⏳ 待训练
