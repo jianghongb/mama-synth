@@ -10,10 +10,10 @@ class Pix2PixHDModel(BaseModel):
     def name(self):
         return 'Pix2PixHDModel'
     
-    def init_loss_filter(self, use_gan_feat_loss, use_vgg_loss, use_tumor_loss=False, use_ssim_loss=False, use_mssc_loss=False, use_edge_loss=False):
-        flags = (True, use_gan_feat_loss, use_vgg_loss, True, True, use_tumor_loss, use_ssim_loss, use_mssc_loss, use_edge_loss)
-        def loss_filter(g_gan, g_gan_feat, g_vgg, d_real, d_fake, g_tumor, g_ssim, g_mssc, g_edge):
-            return [l for (l,f) in zip((g_gan,g_gan_feat,g_vgg,d_real,d_fake,g_tumor,g_ssim,g_mssc,g_edge),flags) if f]
+    def init_loss_filter(self, use_gan_feat_loss, use_vgg_loss, use_tumor_loss=False, use_ssim_loss=False, use_mssc_loss=False, use_edge_loss=False, use_unc_loss=False):
+        flags = (True, use_gan_feat_loss, use_vgg_loss, True, True, use_tumor_loss, use_ssim_loss, use_mssc_loss, use_edge_loss, use_unc_loss)
+        def loss_filter(g_gan, g_gan_feat, g_vgg, d_real, d_fake, g_tumor, g_ssim, g_mssc, g_edge, g_unc):
+            return [l for (l,f) in zip((g_gan,g_gan_feat,g_vgg,d_real,d_fake,g_tumor,g_ssim,g_mssc,g_edge,g_unc),flags) if f]
         return loss_filter
     
     def initialize(self, opt):
@@ -35,7 +35,8 @@ class Pix2PixHDModel(BaseModel):
         self.netG = networks.define_G(netG_input_nc, opt.output_nc, opt.ngf, opt.netG, 
                                       opt.n_downsample_global, opt.n_blocks_global, opt.n_local_enhancers, 
                                       opt.n_blocks_local, opt.norm, gpu_ids=self.gpu_ids,
-                                      residual_mode=getattr(opt, 'residual_mode', False))        
+                                      residual_mode=getattr(opt, 'residual_mode', False),
+                                      uncertainty=getattr(opt, 'uncertainty', False))        
 
         # Discriminator network
         if self.isTrain:
@@ -80,7 +81,8 @@ class Pix2PixHDModel(BaseModel):
             self.use_mssc_loss = self.lambda_mssc > 0
             self.lambda_edge = getattr(opt, 'lambda_edge', 0)
             self.use_edge_loss = self.lambda_edge > 0
-            self.loss_filter = self.init_loss_filter(not opt.no_ganFeat_loss, not opt.no_vgg_loss, self.use_tumor_loss, self.use_ssim_loss, self.use_mssc_loss, self.use_edge_loss)
+            self.use_unc_loss = getattr(opt, 'uncertainty', False)
+            self.loss_filter = self.init_loss_filter(not opt.no_ganFeat_loss, not opt.no_vgg_loss, self.use_tumor_loss, self.use_ssim_loss, self.use_mssc_loss, self.use_edge_loss, self.use_unc_loss)
             
             self.criterionGAN = networks.GANLoss(use_lsgan=not opt.no_lsgan, tensor=self.Tensor)   
             self.criterionFeat = torch.nn.L1Loss()
@@ -91,7 +93,7 @@ class Pix2PixHDModel(BaseModel):
                 
         
             # Names so we can breakout loss
-            self.loss_names = self.loss_filter('G_GAN','G_GAN_Feat','G_VGG','D_real', 'D_fake', 'G_Tumor', 'G_SSIM', 'G_MSSC', 'G_Edge')
+            self.loss_names = self.loss_filter('G_GAN','G_GAN_Feat','G_VGG','D_real', 'D_fake', 'G_Tumor', 'G_SSIM', 'G_MSSC', 'G_Edge', 'G_Unc')
 
             # initialize optimizers
             # optimizer G
@@ -176,7 +178,12 @@ class Pix2PixHDModel(BaseModel):
             input_concat = torch.cat((input_label, feat_map), dim=1)                        
         else:
             input_concat = input_label
-        fake_image = self.netG.forward(input_concat)
+
+        log_var = None
+        if getattr(self.opt, 'uncertainty', False):
+            fake_image, log_var = self.netG.forward(input_concat)
+        else:
+            fake_image = self.netG.forward(input_concat)
 
         # Apply breast mask to fake/real for loss computation (chest wall ignored)
         if breast_mask is not None:
@@ -238,6 +245,23 @@ class Pix2PixHDModel(BaseModel):
         if self.use_mssc_loss:
             loss_G_MSSC = self.criterionMSSC(fake_image, real_image, input_label) * self.lambda_mssc
 
+        # Uncertainty-aware heteroscedastic reconstruction loss
+        loss_G_Unc = 0
+        if log_var is not None:
+            # Spatial weighting: background=1, breast=20, tumor=1000
+            unc_weight = torch.ones_like(real_image)
+            if breast_mask is not None:
+                bm = breast_mask.cuda() if torch.cuda.is_available() else breast_mask
+                unc_weight = unc_weight + 19.0 * bm
+            if mask is not None:
+                mask_gpu = mask.data.cuda() if torch.cuda.is_available() else mask.data
+                unc_weight = unc_weight + 980.0 * mask_gpu
+            # Normalize weights
+            unc_weight = unc_weight / unc_weight.mean()
+            # Heteroscedastic loss: w * exp(-log_var) * (mu - x)^2 + log_var
+            precision = torch.exp(-log_var)
+            loss_G_Unc = (unc_weight * precision * (fake_image - real_image) ** 2 + log_var).mean()
+
         # Edge loss: enforce sharp boundaries (Sobel-based)
         loss_G_Edge = 0
         if self.use_edge_loss:
@@ -253,7 +277,7 @@ class Pix2PixHDModel(BaseModel):
             loss_G_Edge = torch.nn.functional.l1_loss(fake_edge, real_edge) * self.lambda_edge
         
         # Only return the fake_B image if necessary to save BW
-        return [ self.loss_filter( loss_G_GAN, loss_G_GAN_Feat, loss_G_VGG, loss_D_real, loss_D_fake, loss_G_Tumor, loss_G_SSIM, loss_G_MSSC, loss_G_Edge ), None if not infer else fake_image ]
+        return [ self.loss_filter( loss_G_GAN, loss_G_GAN_Feat, loss_G_VGG, loss_D_real, loss_D_fake, loss_G_Tumor, loss_G_SSIM, loss_G_MSSC, loss_G_Edge, loss_G_Unc ), None if not infer else fake_image ]
 
     def inference(self, label, inst, image=None):
         # Encode Inputs        
@@ -274,10 +298,13 @@ class Pix2PixHDModel(BaseModel):
            
         if torch.__version__.startswith('0.4'):
             with torch.no_grad():
-                fake_image = self.netG.forward(input_concat)
+                output = self.netG.forward(input_concat)
         else:
-            fake_image = self.netG.forward(input_concat)
-        return fake_image
+            output = self.netG.forward(input_concat)
+        # If uncertainty mode, output is (mu, log_var) — return only mu
+        if isinstance(output, tuple):
+            return output[0]
+        return output
 
     def sample_features(self, inst): 
         # read precomputed feature clusters 

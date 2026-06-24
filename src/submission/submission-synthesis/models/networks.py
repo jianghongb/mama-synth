@@ -25,10 +25,11 @@ def get_norm_layer(norm_type='instance'):
     return norm_layer
 
 def define_G(input_nc, output_nc, ngf, netG, n_downsample_global=3, n_blocks_global=9, n_local_enhancers=1, 
-             n_blocks_local=3, norm='instance', gpu_ids=[], residual_mode=False):    
+             n_blocks_local=3, norm='instance', gpu_ids=[], residual_mode=False, uncertainty=False):    
     norm_layer = get_norm_layer(norm_type=norm)     
     if netG == 'global':    
-        netG = GlobalGenerator(input_nc, output_nc, ngf, n_downsample_global, n_blocks_global, norm_layer, residual_mode=residual_mode)       
+        netG = GlobalGenerator(input_nc, output_nc, ngf, n_downsample_global, n_blocks_global, norm_layer,
+                               residual_mode=residual_mode, uncertainty=uncertainty)       
     elif netG == 'local':        
         netG = LocalEnhancer(input_nc, output_nc, ngf, n_downsample_global, n_blocks_global, 
                                   n_local_enhancers, n_blocks_local, norm_layer, residual_mode=residual_mode)
@@ -195,10 +196,11 @@ class LocalEnhancer(nn.Module):
 
 class GlobalGenerator(nn.Module):
     def __init__(self, input_nc, output_nc, ngf=64, n_downsampling=3, n_blocks=9, norm_layer=nn.BatchNorm2d, 
-                 padding_type='reflect', residual_mode=False):
+                 padding_type='reflect', residual_mode=False, uncertainty=False):
         assert(n_blocks >= 0)
         super(GlobalGenerator, self).__init__()        
         self.residual_mode = residual_mode
+        self.uncertainty = uncertainty
         activation = nn.ReLU(True)        
 
         model = [nn.ReflectionPad2d(3), nn.Conv2d(input_nc, ngf, kernel_size=7, padding=0), norm_layer(ngf), activation]
@@ -218,17 +220,41 @@ class GlobalGenerator(nn.Module):
             mult = 2**(n_downsampling - i)
             model += [nn.ConvTranspose2d(ngf * mult, int(ngf * mult / 2), kernel_size=3, stride=2, padding=1, output_padding=1),
                        norm_layer(int(ngf * mult / 2)), activation]
+        # Main output head (mean / delta)
         model += [nn.ReflectionPad2d(3), nn.Conv2d(ngf, output_nc, kernel_size=7, padding=0)]
         if not residual_mode:
             model += [nn.Tanh()]
         self.model = nn.Sequential(*model)
+
+        # Uncertainty head: predicts pixel-wise log-variance
+        if uncertainty:
+            self.log_var_head = nn.Sequential(
+                nn.ReflectionPad2d(3),
+                nn.Conv2d(ngf, output_nc, kernel_size=7, padding=0),
+            )
+            # Shared backbone up to (but not including) final conv
+            # We'll split forward through shared layers then branch
+            # Redefine: shared = all except last 2-3 layers, then two heads
+            shared_end = -(3 if residual_mode else 4)  # exclude [ReflPad, Conv7x7] or [ReflPad, Conv7x7, Tanh]
+            self.shared = nn.Sequential(*list(self.model.children())[:shared_end])
+            self.mean_head = nn.Sequential(*list(self.model.children())[shared_end:])
+            del self.model
             
     def forward(self, input):
-        delta = self.model(input)
-        if self.residual_mode:
-            # output = pre + delta; skip-connect input channels to output
-            return input[:, :delta.shape[1], :, :] + delta
-        return delta             
+        if self.uncertainty:
+            feat = self.shared(input)
+            delta = self.mean_head(feat)
+            log_var = self.log_var_head(feat).clamp(-1.5, 3.0)
+            if self.residual_mode:
+                mu = input[:, :delta.shape[1], :, :] + delta
+            else:
+                mu = delta
+            return mu, log_var
+        else:
+            delta = self.model(input)
+            if self.residual_mode:
+                return input[:, :delta.shape[1], :, :] + delta
+            return delta             
         
 # Define a resnet block
 class ResnetBlock(nn.Module):
