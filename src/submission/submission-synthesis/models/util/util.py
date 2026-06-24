@@ -36,6 +36,10 @@ def tensor2label(label_tensor, n_label, imtype=np.uint8):
 
 def save_image(image_numpy, image_path):
     image_pil = Image.fromarray(image_numpy)
+    if image_pil.mode in ('LA', 'RGBA', 'PA'):
+        image_pil = image_pil.convert('RGB')
+    elif image_pil.mode == 'I;16':
+        image_pil = image_pil.convert('L')
     image_pil.save(image_path)
 
 def mkdirs(paths):
