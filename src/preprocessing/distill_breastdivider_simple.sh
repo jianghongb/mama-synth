@@ -55,8 +55,9 @@ for img_file, lbl_file, case_id in tqdm(pairs):
     img_3d = nib.load(str(img_file)).get_fdata().astype(np.float32)
     lbl_3d = nib.load(str(lbl_file)).get_fdata()
 
-    # Take axial middle slice (last axis)
-    mid = img_3d.shape[2] // 2
+    # Take slice with largest breast area (axial = last axis)
+    breast_area = (lbl_3d > 0).sum(axis=(0, 1))
+    mid = int(np.argmax(breast_area))
     img_2d = img_3d[:, :, mid]
     lbl_2d = (lbl_3d[:, :, mid] > 0).astype(np.int16)  # binary: left+right = breast
 
