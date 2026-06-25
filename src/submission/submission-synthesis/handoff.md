@@ -940,13 +940,24 @@ Input 512×512 ─┬─ AvgPool ─→ 256×256 → [v20 Global (冻结)] → 2
 - Epoch 1-20: 冻结 Global（用 v20 权重），只训 Local 层
 - Epoch 21-200: 解冻全网络，端到端 fine-tune
 
-**预期效果**:
-- 高频细节改善 → LPIPS ↓, SSIM ↑
-- Tumor 边界更锐利 → Dice ↑, HD95 ↓
-- 确定性 forward（不像 SDEdit 有随机性），不会降低结构一致性
-- 推理额外耗时 < 0.5s
+**结果 (data_split/test, 199 cases)**:
 
-**状态**: ⏳ 待训练
+| Metric | v20 | **v23** |
+|--------|:-:|:-:|
+| MSE ↓ | **0.574** | 0.922 |
+| LPIPS ↓ | **0.137** | 0.141 |
+| SSIM_tumor ↑ | **0.623** | 0.367 |
+| FRD ↓ | — | 11.91 |
+
+**分析**:
+- LocalEnhancer + ngf=32 容量不足，SSIM_tumor 大幅下降 (0.62→0.37)
+- LPIPS 和 FRD 接近 v11 水平 — 感知质量 OK 但结构精度差
+- 推理时需注意 residual mode: `result = pre + netG(pre)`
+- **Bug found**: inference 初始缺少 `pre + Δ` 导致 MSE=2.96，修复后 MSE=0.92
+
+**结论**: LocalEnhancer (ngf=32) 不如 GlobalGenerator (ngf=64)。如果要用 LocalEnhancer 需要 ngf≥64。
+
+**状态**: ✅ 完成 — 不采用
 
 ---
 
@@ -1113,32 +1124,3 @@ L_unc = mean[ ω × exp(-log σ²) × (μ - x)² + log σ² ]
 - Dice 0.715 > v14，接近 v16
 
 **结论**: Bilateral split 对 SSIM_tumor 贡献巨大，但 MSE 代价较高。适合 ensemble 或作为 SSIM 指标的优化方向。
-
----
-
-## v23 Results (LocalEnhancer)
-
-- **Changes from v20**: GlobalGenerator → LocalEnhancer, ngf=64→32, n_local_enhancers=1
-- **Training**: `berzelius_train_v23_local_enhancer.sh`, data_split_v5, 200 epochs
-- **Architecture**: LocalEnhancer (ngf=32, n_local_enhancers=1, n_blocks_local=3), residual_mode=True
-
-**结果 (data_split/test, 199 cases)**:
-
-| Metric | v20 | **v23** |
-|--------|:-:|:-:|
-| MSE ↓ | **0.574** | 0.922 |
-| LPIPS ↓ | **0.137** | 0.141 |
-| SSIM_tumor ↑ | **0.623** | 0.367 |
-| FRD ↓ | — | 11.91 |
-
-**分析**:
-- LocalEnhancer + ngf=32 容量不足，SSIM_tumor 大幅下降 (0.62→0.37)
-- LPIPS 和 FRD 接近 v11 水平 — 感知质量 OK 但结构精度差
-- 推理时需注意 residual mode: `result = pre + netG(pre)`
-
-**结论**: LocalEnhancer (ngf=32) 不如 GlobalGenerator (ngf=64)。如果要用 LocalEnhancer 需要 ngf≥64。
-
-### Possible Improvements for v24
-- LocalEnhancer with ngf=64 (match GlobalGenerator capacity)
-- 增大 tumor_weight (参考 SAFE-Diff 用 1000×)
-- 加入 uncertainty-aware loss
