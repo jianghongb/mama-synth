@@ -44,12 +44,12 @@ mkdir -p $nnUNet_raw $nnUNet_preprocessed $nnUNet_results
 echo "=== Step 1: 准备输入 ==="
 mkdir -p $INPUT_3D
 
-# 使用 BreastDividerDataset（多中心、多模态 3D breast MRI）
+# 使用 BreastDividerDataset（分 batch1 和 batch2）
 if [ -d "$BD_DATASET" ]; then
-    for f in $BD_DATASET/imagesTr/*_0000.nii.gz; do
+    for f in $BD_DATASET/imagesTr_batch1/*_0000.nii.gz; do
         [ -f "$f" ] && ln -sf "$f" "$INPUT_3D/$(basename $f)"
     done
-    for f in $BD_DATASET/imagesTs/*_0000.nii.gz; do
+    for f in $BD_DATASET/imagesTr_batch2/*_0000.nii.gz; do
         [ -f "$f" ] && ln -sf "$f" "$INPUT_3D/$(basename $f)"
     done
 fi
