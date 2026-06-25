@@ -1,0 +1,20 @@
+FROM --platform=linux/amd64 pytorch/pytorch:2.0.1-cuda11.7-cudnn8-runtime
+
+ENV PYTHONUNBUFFERED=1
+
+RUN groupadd -r user && useradd -m --no-log-init -r -g user user
+
+WORKDIR /opt/app
+
+RUN pip install --no-cache-dir SimpleITK==2.3.1
+
+COPY --chown=user:user models/networks.py ./models/networks.py
+COPY --chown=user:user models/__init__.py ./models/__init__.py
+COPY --chown=user:user inference_ensemble.py ./inference_ensemble.py
+COPY --chown=user:user weights/ ./weights/
+
+RUN mkdir -p /output && chown user:user /output
+
+USER user
+
+ENTRYPOINT ["python", "inference_ensemble.py"]
