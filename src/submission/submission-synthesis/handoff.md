@@ -1,5 +1,38 @@
 # Pix2PixHD for MAMA-SYNTH — Handoff
 
+---
+
+## Executive Summary (2026-06-25)
+
+### Best Models
+
+| Rank | Version | MSE ↓ | LPIPS ↓ | SSIM_tumor ↑ | Architecture | Key Change |
+|:---:|---------|:-----:|:-------:|:------------:|--------------|------------|
+| 🥇 | **v22** | **0.196** | **0.101** | 0.698 | GlobalGen, ngf=64, n_blocks=12 | Deeper network |
+| 🥈 | **v17** | 0.216 | 0.109 | 0.688 | GlobalGen + SDEdit refiner | Diffusion refinement |
+| 🥉 | **v11** | 0.223 | 0.127 | 0.669 | GlobalGen, ngf=64 | data_split_v4 baseline |
+| 4 | v21 | 0.974 | 0.145 | **0.784** 🏆 | Bilateral split | Best SSIM but high MSE |
+| 5 | v20 | 0.574 | 0.137 | 0.623 | GlobalGen + Dataset920 mask | 2D breast mask |
+| 6 | v23 | 0.922 | 0.140 | 0.367 | LocalEnhancer, ngf=32 | ❌ 容量不足 |
+
+### Current Recommendation
+- **提交用**: v22 (best MSE + LPIPS) 或 v17 (balanced)
+- **SSIM_tumor 最优**: v21 (bilateral split)
+- **不采用**: v23 (LocalEnhancer ngf=32 失败)
+
+### Active Experiments
+- v25: Uncertainty-Aware Loss (SAFE-Diff 启发) — ⏳ 待训练
+- K-Fold v20b — ⏳ 进行中
+
+### Quick Reference
+- 架构: Section 1
+- 数据集: Section 2
+- Breast Masking: Section 3
+- Docker 提交: Section 6
+- GC 评估指标: Section 7
+
+---
+
 ## 1. 架构概述
 
 **GlobalGenerator**: Encoder(4×下采样) → 9×ResNet Block → Decoder, 残差模式 `output = input + Δ`
@@ -837,7 +870,7 @@ v20 用 Dataset920 (distilled 2D，从 Dataset932 3D 蒸馏而来) 生成训练 
 
 ---
 
-## 19. K-Fold Cross-Validation 结果 (v14 config, 无 LABREAST)
+## 18. K-Fold Cross-Validation 结果 (v14 config, 无 LABREAST)
 
 **配置**: v14 (GAN + MSEC=50 + breast mask + intensity aug), stratified by data source
 **数据**: DUKE (280) + ISPY2 (973) + YUNNAN (100) = 1353 cases
@@ -907,7 +940,7 @@ v20 用 Dataset920 (distilled 2D，从 Dataset932 3D 蒸馏而来) 生成训练 
 
 ---
 
-## 19. v23: Local Enhancer 全分辨率精修
+## 20. v23: Local Enhancer 全分辨率精修
 
 **动机**: v20 的 GlobalGenerator 在 32×32 bottleneck 做合成，高频细节（tumor 边界、组织纹理）受限于 4 次下采样的信息损失。Local Enhancer 在全分辨率（512→256→512）上精修，只做 1 次下采样。
 
@@ -961,7 +994,7 @@ Input 512×512 ─┬─ AvgPool ─→ 256×256 → [v20 Global (冻结)] → 2
 
 ---
 
-## 20. K-Fold Ensemble 结果
+## 21. K-Fold Ensemble 结果
 
 **方法**: 对每个 test case，用所有**未见过**它的模型（3 个）做推理，取平均。
 **数据**: 1353 cases (DUKE+ISPY2+YUNNAN)，每个 case 被 3 个独立模型 ensemble。
@@ -987,7 +1020,7 @@ Input 512×512 ─┬─ AvgPool ─→ 256×256 → [v20 Global (冻结)] → 2
 
 ---
 
-## 21. v24: Breast Mask 作为条件输入 (Mask-as-Input)
+## 22. v24: Breast Mask 作为条件输入 (Mask-as-Input)
 
 **动机**: v20 的 breast mask 仅用于 loss masking（告诉模型"别管背景"），但 Generator 本身看不到乳房边界。v24 把 breast mask 作为第 2 输入通道，让 Generator 有**显式的解剖先验**。
 
@@ -1045,7 +1078,7 @@ v24: concat(pre-contrast, breast_mask) (2ch) → Generator(input_nc=2) → delta
 
 ---
 
-## 22. v25: Uncertainty-Aware Heteroscedastic Loss (SAFE-Diff 启发)
+## 23. v25: Uncertainty-Aware Heteroscedastic Loss (SAFE-Diff 启发)
 
 **动机**: SAFE-Diff (Zhang et al., 2026, arXiv:2605.25767) 提出 heteroscedastic uncertainty loss，让网络自适应地对不同区域施加不同重建权重。确定区域强制精确重建，模糊区域（tumor 边界、异质组织）降低 loss 权重避免强行拟合噪声。
 
@@ -1100,7 +1133,7 @@ L_unc = mean[ ω × exp(-log σ²) × (μ - x)² + log σ² ]
 
 ---
 
-## 21. v21_nomask: Bilateral Split + Full-Image Background
+## 24. v21_nomask: Bilateral Split + Full-Image Background
 
 **方法**: 乳房内部用 v21 bilateral GAN，乳房外部用 v20 全图 GAN（不用硬 mask composite）
 - 乳房分割: Dataset920
