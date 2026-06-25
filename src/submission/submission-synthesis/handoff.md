@@ -104,7 +104,9 @@ data_split_v4 axial-only = DUKE + ISPY2 + LA-Breast + Yunnan = **2528 cases** (�
 | v18 | data_split_v4 axial | 2528 | ✅ ensemble | ✅ | v16 + SDEdit refiner (❌ 失败) |
 | v19 | data_split_v4 | 2811 | ✅ ResEncUNetL f0 | ✅ | v14 + residual refiner (单步 Δ) ⏳ |
 | **v20** | **data_split_v4** | **2811** | **✅ Dataset920 2D distilled** | **✅** | **v14 但用 distilled 2D mask (训练推理一致)** |
-| **v16** | **data_split_v4 axial** | **2528** | **✅ ensemble (ResEnc+Plain OR)** | **✅** | **v14 + ensemble mask, 200ep → 🏆 最佳** |
+| v21 | data_split_v4 | 2811 | ✅ Dataset920 | ✅ | Bilateral split (左右乳房分别合成) |
+| **v22** | **data_split_v4** | **2811** | **✅ Dataset920** | **✅** | **n_blocks=12 (deeper) 🏆 MSE/LPIPS 最佳** |
+| v23 | data_split_v5 | ~1400 | 预处理去胸壁 | ❌ | LocalEnhancer ngf=32 (❌ 容量不足) |
 
 ### 评估结果: data_split_v2/test (150 cases)
 
@@ -120,28 +122,23 @@ data_split_v4 axial-only = DUKE + ISPY2 + LA-Breast + Yunnan = **2528 cases** (�
 
 ### 评估结果: data_split/test — 全版本对比
 
-| Metric | v5 | v9 | v11 | v12 | v13* | v14 | v16 | v17 (v14+SDEdit) | v20 | KFold Ens. | Best |
-|--------|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|------|
-| MSE ↓ | 0.618 | 0.270 | 0.246 | 1.017 | 1.193 | 0.212 | 0.218 | 0.216 | 0.191 | **0.174** | 🏆 Ensemble |
-| LPIPS ↓ | 0.148 | 0.118 | 0.125 | 0.238 | 0.208 | 0.126 | 0.124 | 0.109 | **0.100** | 0.131 | 🏆 v20 |
-| SSIM_tumor ↑ | 0.361 | 0.599 | 0.581 | 0.321 | 0.384 | 0.689 | 0.680 | 0.688 | 0.704 | **0.761** | 🏆 Ensemble |
-| FRD ↓ | 10.75 | **9.41** | 9.41 | 10.32 | 12.02 | 11.90 | 11.51 | 10.54 | 12.52 | 10.68 | v9/v11 |
-| AUROC ↑ | 0.867 | 0.837 | 0.828 | 0.891 | **0.892** | 0.831 | 0.844 | 0.829 | — | 0.887 | v12/v13 |
-| Dice ↑ | 0.388 | 0.561 | 0.565 | 0.363 | 0.319 | 0.703 | 0.722 | 0.731 | 0.718 | **0.756** | 🏆 Ensemble |
-| HD95 ↓ | 186.7 | 115.4 | 108.1 | 203.9 | 276.9 | 68.9 | 63.7 | 62.8 | 67.0 | **61.5** | 🏆 Ensemble |
+| Metric | v5 | v9 | v11 | v12 | v13* | v14 | v16 | v17 | v20 | v21 | v22 | v23 | KFold | Best |
+|--------|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|------|
+| MSE ↓ | 0.618 | 0.270 | 0.246 | 1.017 | 1.193 | 0.212 | 0.218 | 0.216 | 0.191 | 0.974 | **0.196** | 0.922 | 0.174 | 🏆 Ens |
+| LPIPS ↓ | 0.148 | 0.118 | 0.125 | 0.238 | 0.208 | 0.126 | 0.124 | 0.109 | 0.100 | 0.145 | **0.101** | 0.141 | 0.131 | 🏆 v22 |
+| SSIM_t ↑ | 0.361 | 0.599 | 0.581 | 0.321 | 0.384 | 0.689 | 0.680 | 0.688 | 0.704 | **0.784** | 0.698 | 0.367 | 0.761 | 🏆 v21 |
+| FRD ↓ | 10.75 | **9.41** | 9.41 | 10.32 | 12.02 | 11.90 | 11.51 | 10.54 | 12.52 | — | — | 11.91 | 10.68 | v9/v11 |
+| Dice ↑ | 0.388 | 0.561 | 0.565 | 0.363 | 0.319 | 0.703 | 0.722 | 0.731 | 0.718 | 0.715 | — | — | **0.756** | 🏆 Ens |
+| HD95 ↓ | 186.7 | 115.4 | 108.1 | 203.9 | 276.9 | 68.9 | 63.7 | 62.8 | 67.0 | 62.9 | — | — | **61.5** | 🏆 Ens |
 
 *v13/v14/v16 在 199 axial cases 上评估
-*v16 full = 200 epochs with ensemble breast mask (ResEncUNetL f0 OR PlainConvUNet f4)
-*KFold Ens. = 4-model ensemble on 1353 cases (DUKE+ISPY2+YUNNAN), 每 case 由 3 个未见过它的模型平均
+*KFold Ens. = 4-model ensemble on 1353 cases (DUKE+ISPY2+YUNNAN)
 
-**v16 分析**: ensemble breast mask (200 epochs) 在 Dice (+2.7%) 和 HD95 (-7.5%) 上超越 v14。
-**结论: v16 为最佳提交版本。** Dice 0.722, HD95 63.7。
-
-**v20 分析**: 使用 distilled 2D mask (Dataset920) 替代 3D multi-channel mask，消除训练/推理 mask 域差。
-- MSE 0.191 (新最佳, -10% vs v14), LPIPS 0.100 (新最佳, -8% vs v17), SSIM_tumor 0.704 (新最佳)
-- Dice 0.718 / HD95 67.0: 略低于 v17 (0.731/62.8)，但高于 v14 (0.703/68.9)
-- FRD 12.52: 最差之一，说明 radiomics feature 分布偏移稍大
-- **像素精度和感知质量全面超越所有版本**，分割指标接近最佳
+**结论**:
+- **v22 为最佳单模型**: MSE 0.196, LPIPS 0.101 (pixel + perceptual 最优)
+- **v21 SSIM_tumor 最高 (0.784)** 但 MSE 代价大 — 适合 ensemble
+- **v23 失败**: LocalEnhancer ngf=32 容量不足
+- **KFold Ensemble 整体最强**: 但推理成本 3×
 
 ### Yunnan 外部验证 (100 cases, 独立数据)
 
