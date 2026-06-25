@@ -2,7 +2,7 @@
 #SBATCH -A berzelius-2025-422
 #SBATCH -p berzelius
 #SBATCH --gpus=1
-#SBATCH -t 2:00:00
+#SBATCH -t 6:00:00
 #SBATCH -J kfold_v20_eval2
 #SBATCH -o /proj/berzbiomedicalimagingkth/users/x_honji/kfold_v20_eval2_%j.log
 #SBATCH -e /proj/berzbiomedicalimagingkth/users/x_honji/kfold_v20_eval2_%j.err
