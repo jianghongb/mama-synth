@@ -5,8 +5,9 @@
 set -e
 cd /home/maia-user/jh
 
-# Activate env
-conda activate /home/maia-user/jh/envs/distill
+# Activate env (run 'conda activate /home/maia-user/jh/envs/distill' before this script)
+# Or uncomment below if conda init is done:
+# eval "$(conda shell.bash hook)" && conda activate /home/maia-user/jh/envs/distill
 
 export nnUNet_raw="/home/maia-user/jh/distill/nnUNet_raw"
 export nnUNet_preprocessed="/home/maia-user/jh/distill/nnUNet_preprocessed"
