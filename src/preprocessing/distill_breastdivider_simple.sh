@@ -67,8 +67,8 @@ for img_file, lbl_file, case_id in tqdm(pairs):
 
     # Save as (1, H, W) for nnUNet 2D
     affine = np.eye(4)
-    nib.save(nib.Nifti1Image(img_2d[np.newaxis], affine), str(out_img))
-    nib.save(nib.Nifti1Image(lbl_2d[np.newaxis], affine), str(out_lbl))
+    nib.save(nib.Nifti1Image(img_2d[:, :, np.newaxis], affine), str(out_img))
+    nib.save(nib.Nifti1Image(lbl_2d[:, :, np.newaxis], affine), str(out_lbl))
     count += 1
 
 # dataset.json
