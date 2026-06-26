@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -A berzelius-2025-422
 #SBATCH -p berzelius
-#SBATCH --gpus=0
+#SBATCH --gpus=1
 #SBATCH -t 6:00:00
 #SBATCH -J distill_extract
 #SBATCH -o /proj/berzbiomedicalimagingkth/users/x_honji/DSB_for_chanllenge/distill_extract_%j.log
