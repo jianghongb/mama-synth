@@ -18,9 +18,9 @@ eval "$(conda shell.bash hook)"
 conda activate $PROJ/envs/gan
 pip show huggingface_hub > /dev/null 2>&1 || pip install huggingface_hub
 
-echo "=== Downloading BreastDividerDataset (multi-threaded) ==="
+echo "=== Downloading BreastDividerDataset (batch1 only, ~220GB) ==="
 python -c "
 from huggingface_hub import snapshot_download
-snapshot_download('Bubenpo/BreastDividerDataset', repo_type='dataset', local_dir='$WORK/BreastDividerDataset', max_workers=16)
+snapshot_download('Bubenpo/BreastDividerDataset', repo_type='dataset', local_dir='$WORK/BreastDividerDataset', max_workers=16, allow_patterns=['imagesTr_batch1/*', 'labelsTr_batch1/*', 'dataset.json', 'breastdivider_id_mapping.csv'])
 "
 echo "=== Download complete ==="
