@@ -20,11 +20,11 @@ pip show nibabel > /dev/null 2>&1 || pip install nibabel
 BD_DIR="$WORK/BreastDividerDataset"
 DATASET_DIR="$WORK/Dataset930_BreastDivider2D"
 
-echo "=== Extracting 2D slices (T1w only) ==="
+echo "=== Extracting 2D slices (T1w only) + deleting non-T1w files ==="
 python -c "
 import nibabel as nib
 import numpy as np
-import json, os
+import json, os, csv
 from pathlib import Path
 
 bd_dir = Path('$BD_DIR')
@@ -38,7 +38,6 @@ labels_dir.mkdir(parents=True, exist_ok=True)
 t1w_ids = set()
 id_map = bd_dir / 'breastdivider_id_mapping.csv'
 if id_map.exists():
-    import csv
     t1w_keywords = ['t1', 'vibrant', 'dyn', 'flash', 'thrive', 'pre', 'ax-dyn']
     t2w_keywords = ['t2', 'stir', 'tirm']
     dwi_keywords = ['dwi', 'diff', 'adc', 'b800', 'b1000']
@@ -57,6 +56,7 @@ else:
     print('WARNING: No id_mapping found, using all cases')
 
 count = 0
+deleted = 0
 THRESHOLD = 64
 
 for batch in ['imagesTr_batch1', 'imagesTr_batch2']:
@@ -66,10 +66,16 @@ for batch in ['imagesTr_batch1', 'imagesTr_batch2']:
         continue
     for img_f in sorted(img_batch.glob('*_0000.nii.gz')):
         stem = img_f.name.replace('_0000.nii.gz', '')
-        # Filter T1w only
-        if t1w_ids and stem not in t1w_ids:
-            continue
         lbl_f = lbl_batch / f'{stem}.nii.gz'
+
+        # Delete non-T1w files to free space
+        if t1w_ids and stem not in t1w_ids:
+            os.remove(img_f)
+            if lbl_f.exists():
+                os.remove(lbl_f)
+            deleted += 1
+            continue
+
         if not lbl_f.exists():
             continue
         img = nib.load(str(img_f))
@@ -84,6 +90,9 @@ for batch in ['imagesTr_batch1', 'imagesTr_batch2']:
             img_2d = img_data.astype(np.float32)
             lbl_2d = lbl_data.astype(np.uint8)
         if min(img_2d.shape[:2]) < THRESHOLD:
+            os.remove(img_f)
+            os.remove(lbl_f)
+            deleted += 1
             continue
         lbl_2d = (lbl_2d > 0).astype(np.uint8)
         affine = np.eye(4)
@@ -91,11 +100,16 @@ for batch in ['imagesTr_batch1', 'imagesTr_batch2']:
         nib.save(nib.Nifti1Image(lbl_2d[:, :, np.newaxis], affine), str(labels_dir / f'{stem}.nii.gz'))
         count += 1
         if count % 1000 == 0:
-            print(f'  {count} cases...')
+            print(f'  {count} extracted, {deleted} deleted...')
+
+        # Delete source after extraction to free space
+        os.remove(img_f)
+        os.remove(lbl_f)
+        deleted += 1
 
 ds = {'channel_names': {'0': 'MRI'}, 'labels': {'background': 0, 'breast': 1}, 'numTraining': count, 'file_ending': '.nii.gz'}
 with open(out_dir / 'dataset.json', 'w') as f:
     json.dump(ds, f, indent=2)
-print(f'Done: {count} T1w cases')
+print(f'Done: {count} T1w cases extracted, {deleted} files deleted')
 "
 echo "=== Extraction complete ==="
