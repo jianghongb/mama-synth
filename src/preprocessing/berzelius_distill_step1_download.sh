@@ -21,9 +21,9 @@ pip show huggingface_hub > /dev/null 2>&1 || pip install huggingface_hub
 # HF_TOKEN should be set via 'hf auth login' on the compute node before running
 #huggingface-cli login
 
-echo "=== Downloading BreastDividerDataset (batch1 only, ~220GB) ==="
+echo "=== Downloading BreastDividerDataset (labels only, images already downloaded) ==="
 python -c "
 from huggingface_hub import snapshot_download
-snapshot_download('Bubenpo/BreastDividerDataset', repo_type='dataset', local_dir='$WORK/BreastDividerDataset', max_workers=16, allow_patterns=['imagesTr_batch1/*', 'labelsTr_batch1/*', 'dataset.json', 'breastdivider_id_mapping.csv'])
+snapshot_download('Bubenpo/BreastDividerDataset', repo_type='dataset', local_dir='$WORK/BreastDividerDataset', max_workers=16, allow_patterns=['labelsTr_batch1/*', 'dataset.json', 'breastdivider_id_mapping.csv'])
 "
 echo "=== Download complete ==="
