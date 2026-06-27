@@ -20,11 +20,11 @@ pip show nibabel > /dev/null 2>&1 || pip install nibabel
 BD_DIR="$WORK/BreastDividerDataset"
 DATASET_DIR="$WORK/Dataset930_BreastDivider2D"
 
-echo "=== Extracting 2D slices ==="
+echo "=== Extracting 2D slices (T1w only) ==="
 python -c "
 import nibabel as nib
 import numpy as np
-import json
+import json, os
 from pathlib import Path
 
 bd_dir = Path('$BD_DIR')
@@ -33,6 +33,28 @@ images_dir = out_dir / 'imagesTr'
 labels_dir = out_dir / 'labelsTr'
 images_dir.mkdir(parents=True, exist_ok=True)
 labels_dir.mkdir(parents=True, exist_ok=True)
+
+# Load T1w case IDs
+t1w_ids = set()
+id_map = bd_dir / 'breastdivider_id_mapping.csv'
+if id_map.exists():
+    import csv
+    t1w_keywords = ['t1', 'vibrant', 'dyn', 'flash', 'thrive', 'pre', 'ax-dyn']
+    t2w_keywords = ['t2', 'stir', 'tirm']
+    dwi_keywords = ['dwi', 'diff', 'adc', 'b800', 'b1000']
+    with open(id_map) as f:
+        reader = csv.reader(f)
+        next(reader)
+        for row in reader:
+            bd_id, orig_id = row[0], row[1].lower()
+            is_t1 = any(k in orig_id for k in t1w_keywords)
+            is_t2 = any(k in orig_id for k in t2w_keywords)
+            is_dwi = any(k in orig_id for k in dwi_keywords)
+            if is_t1 and not is_t2 and not is_dwi:
+                t1w_ids.add(bd_id)
+    print(f'Loaded {len(t1w_ids)} T1w case IDs')
+else:
+    print('WARNING: No id_mapping found, using all cases')
 
 count = 0
 THRESHOLD = 64
@@ -44,6 +66,9 @@ for batch in ['imagesTr_batch1', 'imagesTr_batch2']:
         continue
     for img_f in sorted(img_batch.glob('*_0000.nii.gz')):
         stem = img_f.name.replace('_0000.nii.gz', '')
+        # Filter T1w only
+        if t1w_ids and stem not in t1w_ids:
+            continue
         lbl_f = lbl_batch / f'{stem}.nii.gz'
         if not lbl_f.exists():
             continue
@@ -71,6 +96,6 @@ for batch in ['imagesTr_batch1', 'imagesTr_batch2']:
 ds = {'channel_names': {'0': 'MRI'}, 'labels': {'background': 0, 'breast': 1}, 'numTraining': count, 'file_ending': '.nii.gz'}
 with open(out_dir / 'dataset.json', 'w') as f:
     json.dump(ds, f, indent=2)
-print(f'Done: {count} cases')
+print(f'Done: {count} T1w cases')
 "
 echo "=== Extraction complete ==="
