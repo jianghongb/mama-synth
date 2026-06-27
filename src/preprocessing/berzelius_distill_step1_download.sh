@@ -19,7 +19,7 @@ conda activate $PROJ/envs/gan
 pip show huggingface_hub > /dev/null 2>&1 || pip install huggingface_hub
 
 # HF_TOKEN should be set via 'hf auth login' on the compute node before running
-huggingface-cli login
+#huggingface-cli login
 
 echo "=== Downloading BreastDividerDataset (batch1 only, ~220GB) ==="
 python -c "
