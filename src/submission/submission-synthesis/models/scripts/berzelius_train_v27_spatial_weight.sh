@@ -3,7 +3,7 @@
 #SBATCH -p berzelius
 #SBATCH --gpus=1
 #SBATCH -t 48:00:00
-#SBATCH -J mamasynth_v27
+#SBATCH -J v27_spatial
 #SBATCH -o /proj/berzbiomedicalimagingkth/users/x_honji/train_%j.log
 #SBATCH -e /proj/berzbiomedicalimagingkth/users/x_honji/train_%j.err
 #SBATCH --mail-type=END,FAIL
