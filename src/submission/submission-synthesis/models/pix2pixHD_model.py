@@ -186,13 +186,26 @@ class Pix2PixHDModel(BaseModel):
             fake_image = self.netG.forward(input_concat)
 
         # Apply breast mask to fake/real for loss computation (chest wall ignored)
-        if breast_mask is not None:
+        if getattr(self.opt, 'spatial_weight', False) and breast_mask is not None:
+            # Unified spatial weighting: background=1, breast=20, tumor=1000
+            bm = breast_mask.cuda() if torch.cuda.is_available() else breast_mask
+            spatial_w = torch.ones_like(real_image) + 19.0 * bm
+            if mask is not None:
+                mask_gpu = mask.data.cuda() if torch.cuda.is_available() else mask.data
+                spatial_w = spatial_w + 980.0 * mask_gpu
+            spatial_w = spatial_w / spatial_w.mean()  # batch-wise normalization
+            # For D input, still use breast-masked images
+            fake_masked = fake_image * bm
+            real_masked = real_image * bm
+        elif breast_mask is not None:
             bm = breast_mask.cuda() if torch.cuda.is_available() else breast_mask
             fake_masked = fake_image * bm
             real_masked = real_image * bm
+            spatial_w = None
         else:
             fake_masked = fake_image
             real_masked = real_image
+            spatial_w = None
 
         # Fake Detection and Loss
         pred_fake_pool = self.discriminate(input_label, fake_masked, use_pool=True)
@@ -231,9 +244,12 @@ class Pix2PixHDModel(BaseModel):
                 ssim_val = ssim_fn(fake_image, real_image, data_range=data_range.item())
                 loss_G_SSIM = (1 - ssim_val) * self.lambda_ssim
 
-        # Tumor-weighted L1 loss
+        # Tumor-weighted L1 loss (replaced by spatial_weight when enabled)
         loss_G_Tumor = 0
-        if self.use_tumor_loss and mask is not None:
+        if spatial_w is not None:
+            # Spatially-weighted L1: background=1, breast=20, tumor=1000 (normalized)
+            loss_G_Tumor = (spatial_w * (fake_image - real_image).abs()).mean() * self.tumor_weight
+        elif self.use_tumor_loss and mask is not None:
             mask_gpu = mask.data.cpu() if not torch.cuda.is_available() else mask.data.cuda()
             if mask_gpu.sum() > 0:
                 loss_G_Tumor = torch.nn.functional.l1_loss(
