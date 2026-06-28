@@ -207,6 +207,13 @@ class Pix2PixHDModel(BaseModel):
             real_masked = real_image
             spatial_w = None
 
+        # UC-GAN: D only judges high-confidence regions
+        if log_var is not None:
+            confidence = torch.exp(-log_var).detach()
+            confidence = confidence / confidence.max()
+            fake_masked = fake_masked * confidence
+            real_masked = real_masked * confidence
+
         # Fake Detection and Loss
         pred_fake_pool = self.discriminate(input_label, fake_masked, use_pool=True)
         loss_D_fake = self.criterionGAN(pred_fake_pool, False)        
