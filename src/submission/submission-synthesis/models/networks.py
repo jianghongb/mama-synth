@@ -25,11 +25,11 @@ def get_norm_layer(norm_type='instance'):
     return norm_layer
 
 def define_G(input_nc, output_nc, ngf, netG, n_downsample_global=3, n_blocks_global=9, n_local_enhancers=1, 
-             n_blocks_local=3, norm='instance', gpu_ids=[], residual_mode=False, uncertainty=False):    
+             n_blocks_local=3, norm='instance', gpu_ids=[], residual_mode=False, uncertainty=False, swin_bottleneck=False):    
     norm_layer = get_norm_layer(norm_type=norm)     
     if netG == 'global':    
         netG = GlobalGenerator(input_nc, output_nc, ngf, n_downsample_global, n_blocks_global, norm_layer,
-                               residual_mode=residual_mode, uncertainty=uncertainty)       
+                               residual_mode=residual_mode, uncertainty=uncertainty, swin_bottleneck=swin_bottleneck)       
     elif netG == 'local':        
         netG = LocalEnhancer(input_nc, output_nc, ngf, n_downsample_global, n_blocks_global, 
                                   n_local_enhancers, n_blocks_local, norm_layer, residual_mode=residual_mode)
@@ -196,7 +196,7 @@ class LocalEnhancer(nn.Module):
 
 class GlobalGenerator(nn.Module):
     def __init__(self, input_nc, output_nc, ngf=64, n_downsampling=3, n_blocks=9, norm_layer=nn.BatchNorm2d, 
-                 padding_type='reflect', residual_mode=False, uncertainty=False):
+                 padding_type='reflect', residual_mode=False, uncertainty=False, swin_bottleneck=False):
         assert(n_blocks >= 0)
         super(GlobalGenerator, self).__init__()        
         self.residual_mode = residual_mode
@@ -210,10 +210,18 @@ class GlobalGenerator(nn.Module):
             model += [nn.Conv2d(ngf * mult, ngf * mult * 2, kernel_size=3, stride=2, padding=1),
                       norm_layer(ngf * mult * 2), activation]
 
-        ### resnet blocks
+        ### resnet blocks + optional swin attention in the middle
         mult = 2**n_downsampling
-        for i in range(n_blocks):
-            model += [ResnetBlock(ngf * mult, padding_type=padding_type, activation=activation, norm_layer=norm_layer)]
+        bottleneck_dim = ngf * mult
+        n_half = n_blocks // 2
+        for i in range(n_half):
+            model += [ResnetBlock(bottleneck_dim, padding_type=padding_type, activation=activation, norm_layer=norm_layer)]
+        if swin_bottleneck:
+            # Insert 2 Swin Transformer blocks (W-MSA + SW-MSA)
+            model += [SwinBlock(bottleneck_dim, num_heads=8, window_size=8, shift=False)]
+            model += [SwinBlock(bottleneck_dim, num_heads=8, window_size=8, shift=True)]
+        for i in range(n_blocks - n_half):
+            model += [ResnetBlock(bottleneck_dim, padding_type=padding_type, activation=activation, norm_layer=norm_layer)]
         
         ### upsample         
         for i in range(n_downsampling):
@@ -297,6 +305,45 @@ class ResnetBlock(nn.Module):
     def forward(self, x):
         out = x + self.conv_block(x)
         return out
+
+
+class SwinBlock(nn.Module):
+    """Shifted-window self-attention block for bottleneck features."""
+    def __init__(self, dim, num_heads=8, window_size=8, shift=False):
+        super().__init__()
+        self.dim = dim
+        self.window_size = window_size
+        self.shift = shift
+        self.norm1 = nn.LayerNorm(dim)
+        self.norm2 = nn.LayerNorm(dim)
+        self.attn = nn.MultiheadAttention(dim, num_heads, batch_first=True)
+        self.mlp = nn.Sequential(
+            nn.Linear(dim, dim * 4), nn.GELU(), nn.Linear(dim * 4, dim)
+        )
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+        ws = self.window_size
+        # Shift
+        if self.shift:
+            x = torch.roll(x, shifts=(-ws // 2, -ws // 2), dims=(2, 3))
+        # Reshape to windows: (B*num_windows, ws*ws, C)
+        x_win = x.view(B, C, H // ws, ws, W // ws, ws)
+        x_win = x_win.permute(0, 2, 4, 3, 5, 1).contiguous().view(-1, ws * ws, C)
+        # Self-attention
+        normed = self.norm1(x_win)
+        attn_out, _ = self.attn(normed, normed, normed)
+        x_win = x_win + attn_out
+        # MLP
+        x_win = x_win + self.mlp(self.norm2(x_win))
+        # Reshape back
+        num_h, num_w = H // ws, W // ws
+        x_out = x_win.view(B, num_h, num_w, ws, ws, C).permute(0, 5, 1, 3, 2, 4).contiguous()
+        x_out = x_out.view(B, C, H, W)
+        # Reverse shift
+        if self.shift:
+            x_out = torch.roll(x_out, shifts=(ws // 2, ws // 2), dims=(2, 3))
+        return x_out
 
 class Encoder(nn.Module):
     def __init__(self, input_nc, output_nc, ngf=32, n_downsampling=4, norm_layer=nn.BatchNorm2d):

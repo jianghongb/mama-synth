@@ -36,7 +36,8 @@ class Pix2PixHDModel(BaseModel):
                                       opt.n_downsample_global, opt.n_blocks_global, opt.n_local_enhancers, 
                                       opt.n_blocks_local, opt.norm, gpu_ids=self.gpu_ids,
                                       residual_mode=getattr(opt, 'residual_mode', False),
-                                      uncertainty=getattr(opt, 'uncertainty', False))        
+                                      uncertainty=getattr(opt, 'uncertainty', False),
+                                      swin_bottleneck=getattr(opt, 'swin_bottleneck', False))        
 
         # Discriminator network
         if self.isTrain:

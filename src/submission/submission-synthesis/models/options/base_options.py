@@ -64,6 +64,7 @@ class BaseOptions():
         self.parser.add_argument('--acq_time', action='store_true', help='if specified, the training and inference model is conditioned based on DCE-MRI acquisition time')
         self.parser.add_argument('--residual_mode', action='store_true', help='if specified, generator outputs residual (delta) added to input')
         self.parser.add_argument('--uncertainty', action='store_true', help='if specified, generator outputs pixel-wise log-variance for heteroscedastic loss')
+        self.parser.add_argument('--swin_bottleneck', action='store_true', help='insert Swin Transformer blocks in the middle of bottleneck ResBlocks')
         self.parser.add_argument('--tumor_weight', type=float, default=0, help='weight for tumor-region L1 loss (0 = disabled)')
         self.parser.add_argument('--lambda_vgg', type=float, default=10.0, help='weight for VGG perceptual loss')
         self.parser.add_argument('--lambda_ssim', type=float, default=0, help='weight for SSIM loss (0 = disabled)')
