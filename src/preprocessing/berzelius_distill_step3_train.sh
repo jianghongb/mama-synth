@@ -21,8 +21,6 @@ export nnUNet_raw="$WORK/nnUNet_raw"
 export nnUNet_preprocessed="$WORK/nnUNet_preprocessed"
 export nnUNet_results="$WORK/nnUNet_results"
 export TORCHDYNAMO_DISABLE=1
-export TORCH_COMPILE_DISABLE=1
-export TORCHINDUCTOR_DISABLE=1
 mkdir -p $nnUNet_raw $nnUNet_preprocessed $nnUNet_results
 
 # Link dataset
@@ -32,6 +30,6 @@ echo "=== Preprocess ==="
 nnUNetv2_plan_and_preprocess -d 930 -c 2d --verify_dataset_integrity
 
 echo "=== Train fold 0 ==="
-nnUNetv2_train 930 2d 0 --npz --c
+nnUNetv2_train 930 2d 0 --npz
 
 echo "=== Done ==="
