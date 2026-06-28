@@ -30,7 +30,7 @@ export nnUNet_raw=$PROJ/nnUNet_raw
 export nnUNet_preprocessed=$PROJ/nnUNet_preprocessed
 export nnUNet_results=$PROJ/nnUNet_results
 
-MASK_OUTPUT=$PROJ/data_split_v4/train/mha/breast_mask_2d
+MASK_OUTPUT=$PROJ/data_split_v4/train/mha/breast_mask_930
 
 cd $PROJ/mama-synth/src/submission/submission-synthesis/models
 
