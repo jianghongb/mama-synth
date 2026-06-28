@@ -9,7 +9,7 @@
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=hongjia@kth.se
 #
-# v27: v26 config + spatial weighting (bg=1, breast=20, tumor=1000).
+# v27: v22 config + spatial weighting (bg=1, breast=20, tumor=1000).
 # Replaces binary breast mask + tumor_weight=10 with unified spatial weights.
 # Based on SAFE-Diff (Zhang et al. 2026) spatial weighting strategy.
 
@@ -32,7 +32,7 @@ export nnUNet_results=$PROJ/nnUNet_results
 
 MASK_OUTPUT=$PROJ/data_split_v4/train/mha/breast_mask_2d
 
-echo "=== Starting v27 training (spatial weight: bg=1, breast=20, tumor=1000) ==="
+echo "=== Starting v27 training (v22 + spatial weight: bg=1, breast=20, tumor=1000) ==="
 cd $PROJ/mama-synth/src/submission/submission-synthesis/models
 
 python train.py \
@@ -52,10 +52,10 @@ python train.py \
   --loadSize 512 \
   --fineSize 512 \
   --n_downsample_global 4 \
-  --ngf 96 \
+  --ngf 64 \
   --n_blocks_global 12 \
   --norm instance \
-  --batchSize 4 \
+  --batchSize 8 \
   --niter 100 \
   --niter_decay 100 \
   --lr 0.0002 \
