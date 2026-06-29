@@ -84,7 +84,9 @@ for mha in tqdm(mha_files):
         'spacing': spacing_3d,
     }
     pred = predictor.predict_single_npy_array(input_arr, props, None, None, False)
-    mask = (pred > 0).astype(np.float32)
+    mask = (pred.squeeze() > 0).astype(np.float32)
+    if arr.ndim == 3 and mask.ndim == 2:
+        mask = mask[np.newaxis]
     mask_img = sitk.GetImageFromArray(mask)
     mask_img.CopyInformation(img)
     sitk.WriteImage(mask_img, str(out_path))
