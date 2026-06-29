@@ -55,7 +55,7 @@ output_dir = Path('$MASK_OUTPUT')
 predictor = nnUNetPredictor(tile_step_size=0.5, use_gaussian=True, use_mirroring=False,
     perform_everything_on_device=True, device=torch.device('cuda'), verbose=False, allow_tqdm=False)
 predictor.initialize_from_trained_model_folder(
-    '$PROJ/weights/nnUNet_results/Dataset930_BreastDivider2D/nnUNetTrainer__nnUNetPlans__2d/fold_0',
+    '$PROJ/weights/nnUNet_results/Dataset930_BreastDivider2D/nnUNetTrainer__nnUNetPlans__2d',
     use_folds=(0,), checkpoint_name='checkpoint_final.pth')
 
 mha_files = sorted(input_dir.glob('*.mha'))
