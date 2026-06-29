@@ -46,7 +46,7 @@ from tqdm import tqdm
 
 os.environ['nnUNet_raw'] = '$PROJ/nnUNet_raw'
 os.environ['nnUNet_preprocessed'] = '$PROJ/nnUNet_preprocessed'
-os.environ['nnUNet_results'] = '$PROJ/distill_breastdivider/nnUNet_results'
+os.environ['nnUNet_results'] = '$PROJ/weights/nnUNet_results'
 from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
 
 input_dir = Path('$TRAIN_INPUT')
@@ -55,7 +55,7 @@ output_dir = Path('$MASK_OUTPUT')
 predictor = nnUNetPredictor(tile_step_size=0.5, use_gaussian=True, use_mirroring=False,
     perform_everything_on_device=True, device=torch.device('cuda'), verbose=False, allow_tqdm=False)
 predictor.initialize_from_trained_model_folder(
-    '$PROJ/distill_breastdivider/nnUNet_results/Dataset930_BreastDivider2D/nnUNetTrainer__nnUNetPlans__2d/fold_0',
+    '$PROJ/weights/nnUNet_results/Dataset930_BreastDivider2D/nnUNetTrainer__nnUNetPlans__2d/fold_0',
     use_folds=(0,), checkpoint_name='checkpoint_final.pth')
 
 mha_files = sorted(input_dir.glob('*.mha'))
