@@ -82,7 +82,8 @@ for mha in tqdm(mha_files):
     mask_img.CopyInformation(img)
     sitk.WriteImage(mask_img, str(out_path))
 
-print(f'Done. {len(list(output_dir.glob("*.mha")))} masks generated.')
+n_out = len([f for f in output_dir.iterdir() if f.suffix == '.mha'])
+print(f'Done. {n_out} masks generated.')
 "
     echo "=== Mask generation complete ==="
 else
