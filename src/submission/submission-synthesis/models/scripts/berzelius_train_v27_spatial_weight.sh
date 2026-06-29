@@ -88,6 +88,15 @@ else
     echo "=== Masks already exist ($MASK_OUTPUT), skipping ==="
 fi
 
+# Verify masks exist before training
+MASK_COUNT=$(ls "$MASK_OUTPUT"/*.mha 2>/dev/null | wc -l)
+if [ "$MASK_COUNT" -lt 100 ]; then
+    echo "ERROR: Only $MASK_COUNT masks in $MASK_OUTPUT. Aborting."
+    echo "Check: ls $PROJ/weights/nnUNet_results/Dataset930_BreastDivider2D/nnUNetTrainer__nnUNetPlans__2d/fold_0/"
+    exit 1
+fi
+echo "=== Verified: $MASK_COUNT breast masks ready ==="
+
 echo "=== Starting v27 training (v22 + spatial weight: bg=1, breast=20, tumor=1000) ==="
 cd $PROJ/mama-synth/src/submission/submission-synthesis/models
 
