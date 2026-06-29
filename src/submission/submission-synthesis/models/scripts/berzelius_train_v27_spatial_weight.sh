@@ -124,7 +124,7 @@ python train.py \
   --intensity_aug \
   --spatial_weight \
   --sw_breast 5 \
-  --sw_tumor 100 \
+  --sw_tumor 500 \
   --resize_or_crop resize \
   --loadSize 512 \
   --fineSize 512 \
