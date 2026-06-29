@@ -188,12 +188,14 @@ class Pix2PixHDModel(BaseModel):
 
         # Apply breast mask to fake/real for loss computation (chest wall ignored)
         if getattr(self.opt, 'spatial_weight', False) and breast_mask is not None:
-            # Unified spatial weighting: background=1, breast=20, tumor=1000
+            # Unified spatial weighting: background=1, breast=sw_breast, tumor=sw_tumor
+            sw_breast = getattr(self.opt, 'sw_breast', 5.0)
+            sw_tumor = getattr(self.opt, 'sw_tumor', 50.0)
             bm = breast_mask.cuda() if torch.cuda.is_available() else breast_mask
-            spatial_w = torch.ones_like(real_image) + 19.0 * bm
+            spatial_w = torch.ones_like(real_image) + (sw_breast - 1.0) * bm
             if mask is not None:
                 mask_gpu = mask.data.cuda() if torch.cuda.is_available() else mask.data
-                spatial_w = spatial_w + 980.0 * mask_gpu
+                spatial_w = spatial_w + (sw_tumor - sw_breast) * mask_gpu
             spatial_w = spatial_w / spatial_w.mean()  # batch-wise normalization
             # For D input, still use breast-masked images
             fake_masked = fake_image * bm
