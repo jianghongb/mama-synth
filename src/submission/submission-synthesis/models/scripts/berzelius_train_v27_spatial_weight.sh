@@ -67,13 +67,20 @@ for mha in tqdm(mha_files):
     img = sitk.ReadImage(str(mha))
     arr = sitk.GetArrayFromImage(img).astype(np.float32)
     input_arr = arr[np.newaxis] if arr.ndim == 2 else arr
+    # Dataset930 is pseudo-3D: expects (C, D=1, H, W) and 3D spacing
+    if input_arr.ndim == 2:
+        input_arr = input_arr[np.newaxis, np.newaxis]  # (1, 1, H, W)
+    elif input_arr.ndim == 3:
+        input_arr = input_arr[np.newaxis]  # (1, D, H, W) or (1, 1, H, W)
+    sp = list(img.GetSpacing())
+    spacing_3d = [1.0, sp[0], sp[1]] if len(sp) == 2 else [sp[2], sp[0], sp[1]]
     props = {
         'sitk_stuff': {
             'spacing': img.GetSpacing(),
             'origin': img.GetOrigin(),
             'direction': img.GetDirection(),
         },
-        'spacing': list(img.GetSpacing())[:2],
+        'spacing': spacing_3d,
     }
     pred = predictor.predict_single_npy_array(input_arr, props, None, None, False)
     mask = (pred > 0).astype(np.float32)
