@@ -74,7 +74,7 @@ for mha in tqdm(mha_files):
             'origin': img.GetOrigin(),
             'direction': img.GetDirection(),
         },
-        'spacing': list(img.GetSpacing()),
+        'spacing': list(img.GetSpacing())[:2],
     }
     pred = predictor.predict_single_npy_array(input_arr, props, None, None, False)
     mask = (pred > 0).astype(np.float32)
