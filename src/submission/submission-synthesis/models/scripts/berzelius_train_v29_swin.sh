@@ -52,7 +52,8 @@ python train.py \
   --ngf 64 \
   --n_blocks_global 12 \
   --norm instance \
-  --batchSize 8 \
+  --batchSize 16 \
+  --nThreads 8 \
   --niter 100 \
   --niter_decay 100 \
   --lr 0.0002 \
