@@ -1180,3 +1180,151 @@ L_unc = mean[ ω × exp(-log σ²) × (μ - x)² + log σ² ]
 - FRD 偏高 (12.47) — 大模型可能过拟合训练数据的 radiomics 分布
 - 权重 2.0GB，Docker 容器约 7.5GB，仍在 10GB 限制内
 - v26 kfold ensemble 预期会超过 v14 ensemble
+
+---
+
+## 25. v30: Semi-Disentangled INR-Inspired Generator
+
+**动机**: 借鉴 Implicit Neural Representation (INR) 中 "Semi-Disentangled Spatiotemporal" 的思想——将 DCE-MRI 信号分解为**静态解剖底座**和**动态增强轨迹**。现有 Pix2PixHD 的 residual mode (`output = pre + Δ`) 虽然隐式学了 Δ，但 Δ 无约束，可以在任意位置 hallucinate 增强信号。v30 通过显式解耦，强制 anatomy pass-through + gated enhancement。
+
+### 核心公式
+
+```
+I(x,y,t) = anatomy(x,y) + enhancement(x,y) × dynamics(t)
+
+对 MAMA-SYNTH (t=peak 固定):
+    output(x,y) = pre(x,y) + gate(x,y) × enhancement(x,y)
+```
+
+- `pre(x,y)` — 静态解剖底座，**identity pass-through，不参与生成**
+- `gate(x,y) ∈ [0,1]` — 空间注意力图，学习**哪里该有增强**
+- `enhancement(x,y) ∈ ℝ` — 增强强度图，学习**增强多少**
+- `breast_mask` — 硬约束 gate=0 outside breast（物理不可能在乳腺外增强）
+
+### 架构
+
+```
+pre ──┬──────────────────────────────── (identity) ──────────┐
+      │                                                       + → output
+      └── SharedEncoder ──┬── EnhancementDecoder (heavy) → E  │
+          (6 ResBlocks)   │         ×                         │
+                          └── GateDecoder (light) → G ∈[0,1] ─┘
+                                      ↑
+                                 breast_mask (hard gate)
+```
+
+| 组件 | 功能 | 复杂度 |
+|------|------|--------|
+| SharedEncoder | 4× 下采样 + 6 ResBlocks, 提取多尺度特征 | 共享 |
+| EnhancementDecoder | 4× 上采样 + 3 ResBlocks + **skip connections** | 重 (高频细节) |
+| GateDecoder | 4× 上采样 + 2 ResBlocks, sigmoid, **无 skip** | 轻 (平滑注意力) |
+
+**设计决策**:
+1. **Enhancement 有 skip connections**: 需要还原 tumor 的高频纹理
+2. **Gate 无 skip connections**: gate 应该空间平滑，不该有 salt-and-pepper noise
+3. **Gate × breast_mask**: 硬约束，乳腺外绝对零变化
+4. **Shared encoder**: "半解耦" — 两个 decoder 共享解剖理解，但输出结构不同
+
+### 参数量与 VRAM
+
+| | v26 GlobalGenerator | v30 SemiDisentangled |
+|---|---|---|
+| ngf | 96 | 96 |
+| Bottleneck blocks | 12 | 9 (encoder) + 3 (enhance) + 2 (gate) |
+| 参数量 | 537.9M | **638M** |
+| 模型大小 (FP32) | 2,151 MB | 2,553 MB |
+| 推理 VRAM (bs=1, 512×512) | ~4 GB | ~6.7 GB |
+| 训练 VRAM (bs=8, A100) | ~35 GB | **~42 GB** |
+| T4 16GB (推理) | ✅ | ✅ |
+| A100 80GB (训练 bs=8) | ✅ | ✅ |
+| Docker 容器估算 | ~7.5 GB | ~8.0 GB (< 10GB) |
+
+### Loss 设计（DisentangledLoss）
+
+| Loss | λ | 功能 | 半解耦作用 |
+|------|---|------|-----------|
+| `enhance_l1` | 10.0 | L1(output, gt) 全图重建 | 保证合成质量 |
+| `anatomy` | 5.0 | L1(output-pre) × (1-gate)，breast 外 × 2 | **锁死解剖** |
+| `gate_sparsity` | 0.5 | mean(gate) → encourage sparse | **大部分区域不增强** |
+| `gate_tv` | 0.1 | TV(gate) → smooth gate | 防止 salt-and-pepper |
+| `tumor_boost` | 5.0 | L1(output×tumor_mask, gt×tumor_mask) | 肿瘤精确重建 |
+| `VGG` | 10.0 | VGG perceptual loss | 感知质量 |
+| `GAN` | 1.0 | Multi-scale PatchGAN | 分布对齐 |
+| `feat` | 10.0 | Feature matching (D 中间层) | 稳定训练 |
+| `MSSC` | 20.0 | Multi-Scale Subtraction Consistency | 增强一致性 |
+
+**与 v20 loss 的关键区别**:
+- 新增 `anatomy` loss: 在 gate 覆盖之外惩罚任何偏离 pre 的变化
+- 新增 `gate_sparsity`: 鼓励稀疏增强（真实 DCE 中只有局部组织强增强）
+- 新增 `gate_tv`: 平滑 gate 边界，防止 checker-board artifact
+- `MSSC` 从 50 降到 20: 因为 anatomy lock 已经部分承担了背景一致性
+
+### 预期效果（针对 v21 暴露的问题）
+
+| 问题 | v21 表现 | v30 预期 |
+|------|---------|---------|
+| DUKE_044 (ssim_tumor=-0.48, dice=0) | 肿瘤区域合成失败 | gate 学习增强位置，不会在错误位置 hallucinate |
+| DUKE_055 (MSE=1.23) | 背景 intensity 大面积偏移 | anatomy lock 强制 output ≈ pre (outside gate) |
+| 推理时 mask 恶化 | 硬 mask composite 产生不连续 | gate 是**可学习的 soft mask**，边界自然过渡 |
+| HD95 高 (62.9) | 分割假阳性 | 稀疏 gate 减少非 tumor 区域的 false enhancement |
+
+### 文件
+
+| 文件 | 路径 |
+|------|------|
+| 架构 + Loss | `models/semi_disentangled_generator.py` |
+| 训练脚本 | `models/train_semi_disentangled.py` |
+| 推理脚本 | `models/infer_semi_disentangled.py` |
+| SLURM 脚本 | `models/scripts/berzelius_train_v30_sdinr.sh` |
+
+### 训练命令
+
+```bash
+# Berzelius
+cd /proj/berzbiomedicalimagingkth/users/x_honji/mama-synth/src/submission/submission-synthesis/models/scripts
+sbatch berzelius_train_v30_sdinr.sh
+```
+
+### 推理命令
+
+```bash
+python models/infer_semi_disentangled.py \
+  --weights $PROJ/checkpoints/mamasynth_v30_sdinr/latest_net_G.pth \
+  --input_dir $PROJ/data_multislice/test/mha/input \
+  --output_dir $PROJ/predictions_v30_sdinr \
+  --breast_seg_model $PROJ/nnUNet_results/Dataset920_BreastSeg2D/nnUNetTrainer__nnUNetPlans__2d \
+  --ngf 96 --n_encoder_blocks 9 --n_enhance_blocks 3 --n_gate_blocks 2 \
+  --save_gate  # 保存 gate map 用于可视化分析
+```
+
+### 验证通过
+
+```
+Generator: 638M params (ngf=96, enc=9, enh=3, gate=2)
+Output: [2, 1, 512, 512]
+Gate: [0.229, 0.882] — sigmoid 有效
+Enhancement: [-2.170, 1.408] — 无界残差
+Composition check: 0.000000 — 数学公式精确
+Gate outside breast: 0.000000 — 硬约束生效
+VRAM estimate (inference): ~6.7 GB — T4 OK
+VRAM estimate (train bs=8): ~42 GB — A100 OK
+```
+
+### 与其他版本的关系
+
+| 版本 | 思路 | v30 如何改进 |
+|------|------|------------|
+| v20 (residual GAN) | output = pre + Δ (Δ 无约束) | gate 约束 Δ 只在合理位置非零 |
+| v21 (bilateral split) | 物理分割左右乳房 | gate 软分割，无缝拼接 |
+| v22 (deeper bottleneck) | 更多 ResBlocks 增加感受野 | 分 enhancement 和 gate 两个 decoder |
+| v25 (uncertainty) | 网络预测不确定性 | gate 本质上就是"增强确定性"的 proxy |
+| INR (原始 INR 项目) | SIREN + FiLM, per-pixel 坐标 | 用 CNN 替代 INR 解码（更快，更适合 2D） |
+
+### 状态: ⏳ 待训练
+
+### 后续计划
+
+1. 训练完成后对比 v22/v26 → 确认解耦是否带来 MSE/Dice 提升
+2. 如果 gate map 合理 (肿瘤区域亮，正常组织暗) → 尝试 gate 作为 soft attention 用于 ensemble
+3. v30 + SDEdit refiner (v31?) → 在 gate 区域内做 diffusion 精修
+4. 如果 v30 base 好于 v26 → 做 K-Fold v30 ensemble
