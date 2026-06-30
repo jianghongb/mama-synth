@@ -3,15 +3,14 @@
 #SBATCH -p berzelius
 #SBATCH --gpus=1
 #SBATCH -t 48:00:00
-#SBATCH -J mamasynth_v26
+#SBATCH -J v26_multislice
 #SBATCH -o /proj/berzbiomedicalimagingkth/users/x_honji/train_%j.log
 #SBATCH -e /proj/berzbiomedicalimagingkth/users/x_honji/train_%j.err
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=hongjia@kth.se
 #
 # v26: v22 (n_blocks=12) + ngf=96. Wider+deeper network.
-# Based on v22's HD95 improvement, now also increase channel width.
-# batchSize reduced 8→4 due to larger model (~410M params).
+# Retrained on data_multislice dataset with higher batch size.
 
 PROJ=/proj/berzbiomedicalimagingkth/users/x_honji
 
@@ -26,20 +25,16 @@ conda activate $PROJ/envs/gan
 
 pip show torchmetrics > /dev/null 2>&1 || pip install torchmetrics
 
-export nnUNet_raw=$PROJ/nnUNet_raw
-export nnUNet_preprocessed=$PROJ/nnUNet_preprocessed
-export nnUNet_results=$PROJ/nnUNet_results
+MASK_OUTPUT=$PROJ/data_multislice/train/mha/breast_mask
 
-MASK_OUTPUT=$PROJ/data_split_v4/train/mha/breast_mask_2d
-
-echo "=== Starting v26 training (n_blocks=12, ngf=96) ==="
+echo "=== Starting v26 training (n_blocks=12, ngf=96, data_multislice) ==="
 cd $PROJ/mama-synth/src/submission/submission-synthesis/models
 
 python train.py \
   --name mamasynth_v26 \
   --model pix2pixHD \
   --dataset_mode mha \
-  --dataroot $PROJ/data_split_v4/train \
+  --dataroot $PROJ/data_multislice/train \
   --checkpoints_dir $PROJ/checkpoints \
   --label_nc 0 \
   --input_nc 1 \
@@ -54,7 +49,8 @@ python train.py \
   --ngf 96 \
   --n_blocks_global 12 \
   --norm instance \
-  --batchSize 4 \
+  --batchSize 8 \
+  --nThreads 8 \
   --niter 100 \
   --niter_decay 100 \
   --lr 0.0002 \
