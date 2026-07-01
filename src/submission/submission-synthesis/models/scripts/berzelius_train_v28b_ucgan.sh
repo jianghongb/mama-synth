@@ -26,7 +26,7 @@ conda activate $PROJ/envs/gan
 pip show torchmetrics > /dev/null 2>&1 || pip install torchmetrics
 
 DATAROOT=$PROJ/data_multislice_v2/train
-MASK_OUTPUT=$PROJ/data_multislice_v2/mha/breast_mask
+MASK_OUTPUT=$PROJ/data_multislice_v2/train/mha/breast_mask
 
 echo "=== Starting v28b training (UC-GAN, data_multislice_v2) ==="
 cd $PROJ/mama-synth/src/submission/submission-synthesis/models

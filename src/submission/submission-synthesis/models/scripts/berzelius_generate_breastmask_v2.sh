@@ -26,15 +26,21 @@ export nnUNet_raw=$PROJ/nnUNet_raw
 export nnUNet_preprocessed=$PROJ/nnUNet_preprocessed
 export nnUNet_results=$PROJ/nnUNet_results
 
-INPUT_DIR=$PROJ/data_multislice_v2/mha/input
-OUTPUT_DIR=$PROJ/data_multislice_v2/mha/breast_mask
+INPUT_DIR=$PROJ/data_multislice_v2/train/mha/input
+OUTPUT_DIR=$PROJ/data_multislice_v2/train/mha/breast_mask
 MODEL_DIR=$PROJ/weights/nnUNet_results/Dataset930_BreastDivider2D/nnUNetTrainer__nnUNetPlans__2d
 
-mkdir -p $OUTPUT_DIR
+# Also generate for test set
+INPUT_DIR_TEST=$PROJ/data_multislice_v2/test/mha/input
+OUTPUT_DIR_TEST=$PROJ/data_multislice_v2/test/mha/breast_mask
+
+mkdir -p $OUTPUT_DIR $OUTPUT_DIR_TEST
 
 echo "=== Generating breast masks for data_multislice_v2 ==="
-echo "Input:  $INPUT_DIR ($(ls $INPUT_DIR | wc -l) files)"
-echo "Output: $OUTPUT_DIR"
+echo "Train input:  $INPUT_DIR ($(ls $INPUT_DIR | wc -l) files)"
+echo "Train output: $OUTPUT_DIR"
+echo "Test input:   $INPUT_DIR_TEST ($(ls $INPUT_DIR_TEST | wc -l) files)"
+echo "Test output:  $OUTPUT_DIR_TEST"
 echo "Model:  Dataset930 BreastDivider 2D"
 echo ""
 
@@ -54,11 +60,13 @@ os.environ.setdefault('nnUNet_preprocessed', '$PROJ/nnUNet_preprocessed')
 os.environ.setdefault('nnUNet_results', '$PROJ/nnUNet_results')
 from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
 
-INPUT_DIR = Path('$INPUT_DIR')
-OUTPUT_DIR = Path('$OUTPUT_DIR')
+SPLITS = [
+    (Path('$INPUT_DIR'), Path('$OUTPUT_DIR')),
+    (Path('$INPUT_DIR_TEST'), Path('$OUTPUT_DIR_TEST')),
+]
 MODEL_DIR = '$MODEL_DIR'
 N_POSTPROCESS_WORKERS = 8
-BATCH_SIZE = 32  # batch GPU inference
+BATCH_SIZE = 32
 
 # ─── Load model ──────────────────────────────────────────────
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -80,11 +88,18 @@ props = {
 }
 
 # ─── Gather files to process ─────────────────────────────────
-all_files = sorted(INPUT_DIR.glob('*.mha'))
-todo = [f for f in all_files if not (OUTPUT_DIR / f.name).exists()]
-print(f'Total: {len(all_files)}, already done: {len(all_files)-len(todo)}, to process: {len(todo)}')
+all_todo = []
+for input_dir, output_dir in SPLITS:
+    if not input_dir.exists():
+        print(f'Skipping {input_dir} (not found)')
+        continue
+    all_files = sorted(input_dir.glob('*.mha'))
+    todo = [(f, output_dir) for f in all_files if not (output_dir / f.name).exists()]
+    print(f'{input_dir.parent.parent.name}: {len(all_files)} total, {len(todo)} to process → {output_dir}')
+    all_todo.extend(todo)
 
-if not todo:
+print(f'Total to process: {len(all_todo)}')
+if not all_todo:
     print('Nothing to do!')
     sys.exit(0)
 
@@ -119,32 +134,25 @@ def postprocess_mask(pred_2d):
     return breast_mask
 
 
-def save_mask(fname, mask_2d, ref_img):
-    '''Save mask as MHA with same metadata as reference image.'''
-    arr = ref_img.GetArrayFromImage if hasattr(ref_img, 'GetArrayFromImage') else None
-    out_arr = mask_2d.astype(np.int16)
-    ref_arr = sitk.GetArrayFromImage(ref_img)
-    if ref_arr.ndim == 3:
-        out_arr = out_arr[np.newaxis, ...]
-    out_img = sitk.GetImageFromArray(out_arr)
-    out_img.CopyInformation(ref_img)
-    sitk.WriteImage(out_img, str(OUTPUT_DIR / fname))
-
 # ─── Process in batches ──────────────────────────────────────
-print(f'Processing {len(todo)} files in batches of {BATCH_SIZE}...')
+print(f'Processing {len(all_todo)} files in batches of {BATCH_SIZE}...')
 
 n_done = 0
-for batch_start in range(0, len(todo), BATCH_SIZE):
-    batch_files = todo[batch_start:batch_start + BATCH_SIZE]
+for batch_start in range(0, len(all_todo), BATCH_SIZE):
+    batch_items = all_todo[batch_start:batch_start + BATCH_SIZE]
 
     # Load batch
     batch_data = []
     batch_refs = []
-    for f in batch_files:
+    batch_out_dirs = []
+    batch_fnames = []
+    for f, out_dir in batch_items:
         img = sitk.ReadImage(str(f))
         arr = sitk.GetArrayFromImage(img).astype(np.float32).squeeze()
         batch_data.append(arr)
         batch_refs.append(img)
+        batch_out_dirs.append(out_dir)
+        batch_fnames.append(f.name)
 
     # GPU inference one by one (nnUNet doesn't support true batch for different sizes)
     batch_preds = []
@@ -158,20 +166,30 @@ for batch_start in range(0, len(todo), BATCH_SIZE):
     # Parallel postprocessing + saving
     def process_one(idx):
         mask = postprocess_mask(batch_preds[idx])
-        save_mask(batch_files[idx].name, mask, batch_refs[idx])
+        out_dir = batch_out_dirs[idx]
+        fname = batch_fnames[idx]
+        ref_img = batch_refs[idx]
+        out_arr = mask.astype(np.int16)
+        ref_arr = sitk.GetArrayFromImage(ref_img)
+        if ref_arr.ndim == 3:
+            out_arr = out_arr[np.newaxis, ...]
+        out_img = sitk.GetImageFromArray(out_arr)
+        out_img.CopyInformation(ref_img)
+        sitk.WriteImage(out_img, str(out_dir / fname))
 
     with ThreadPoolExecutor(max_workers=N_POSTPROCESS_WORKERS) as executor:
-        futures = [executor.submit(process_one, i) for i in range(len(batch_files))]
+        futures = [executor.submit(process_one, i) for i in range(len(batch_items))]
         for fut in as_completed(futures):
             fut.result()  # raise exceptions if any
 
-    n_done += len(batch_files)
-    if n_done % 500 == 0 or n_done == len(todo):
-        print(f'  Progress: {n_done}/{len(todo)} ({n_done/len(todo)*100:.1f}%)')
+    n_done += len(batch_items)
+    if n_done % 500 == 0 or n_done == len(all_todo):
+        print(f'  Progress: {n_done}/{len(all_todo)} ({n_done/len(all_todo)*100:.1f}%)')
 
-print(f'Done! {n_done} breast masks saved to {OUTPUT_DIR}')
+print(f'Done! {n_done} breast masks generated.')
 "
 
 echo ""
 echo "=== Complete ==="
-echo "Output: $OUTPUT_DIR ($(ls $OUTPUT_DIR | wc -l) files)"
+echo "Train masks: $OUTPUT_DIR ($(ls $OUTPUT_DIR 2>/dev/null | wc -l) files)"
+echo "Test masks:  $OUTPUT_DIR_TEST ($(ls $OUTPUT_DIR_TEST 2>/dev/null | wc -l) files)"

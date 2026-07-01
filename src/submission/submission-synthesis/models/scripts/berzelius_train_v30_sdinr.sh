@@ -42,7 +42,7 @@ export nnUNet_raw=$PROJ/nnUNet_raw
 export nnUNet_preprocessed=$PROJ/nnUNet_preprocessed
 export nnUNet_results=$PROJ/nnUNet_results
 
-MASK_OUTPUT=$PROJ/data_multislice_v2/mha/breast_mask
+MASK_OUTPUT=$PROJ/data_multislice_v2/train/mha/breast_mask
 
 cd $PROJ/mama-synth/src/submission/submission-synthesis/models
 
