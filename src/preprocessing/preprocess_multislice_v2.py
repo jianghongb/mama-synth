@@ -109,11 +109,6 @@ def process_patient(
     """
     patient_id = patient_dir.name
     try:
-        # Check if this patient already has output (resume support)
-        # A patient is considered done if any _p* file exists for it
-        existing = list(mha_input_dir.glob(f"{patient_id}_p*.mha"))
-        if existing:
-            return patient_id, len(existing)
         # Load all phases
         phase_files = sorted(patient_dir.glob(f"{patient_id}_*.nii.gz"))
         if len(phase_files) < 2:
@@ -159,44 +154,56 @@ def process_patient(
                     global_peak_val = m
                     global_peak_phase = k
 
-        # For each post-contrast phase, find its best slice (vectorised)
-        slices_extracted = set()
+        # For each post-contrast phase, find its best slice + neighbors
+        n_slices_total = tumour_seg.shape[axis]
         n_extracted = 0
+        extra_slices = 2  # ±2 neighbors around each peak
+
         for phase_num in post_phases:
             peak_slice_idx, _ = find_peak_slice_vectorised(
                 phases[phase_num], tumour_seg, axis
             )
 
-            # Skip duplicate slice positions
-            if peak_slice_idx in slices_extracted:
-                continue
+            # Extract peak ± extra_slices
+            for offset in range(-extra_slices, extra_slices + 1):
+                slice_idx = peak_slice_idx + offset
+                if slice_idx < 0 or slice_idx >= n_slices_total:
+                    continue
 
-            # Check mask area
-            mask_2d = np.take(tumour_seg, peak_slice_idx, axis=axis)
-            if mask_2d.sum() < min_mask_area:
-                continue
+                # Check mask area (skip slices with tiny/no tumor, except center)
+                mask_2d = np.take(tumour_seg, slice_idx, axis=axis)
+                if offset != 0 and mask_2d.sum() < min_mask_area:
+                    continue
 
-            slices_extracted.add(peak_slice_idx)
+                # Build filename
+                if offset == 0:
+                    fname = f"{patient_id}_p{phase_num}"
+                else:
+                    fname = f"{patient_id}_p{phase_num}_s{offset:+d}"
 
-            # Extract slices
-            pre_2d = np.take(phases[pre_phase], peak_slice_idx, axis=axis)
-            gt_2d = np.take(phases[global_peak_phase], peak_slice_idx, axis=axis)
-            mask_out = np.rint(mask_2d).astype(np.int16)
+                # Skip if already exists (resume support)
+                if (mha_input_dir / f"{fname}.mha").exists():
+                    n_extracted += 1
+                    continue
 
-            # Z-score normalize
-            pre_norm = zscore(pre_2d, norm_mean, norm_std)
-            gt_norm = zscore(gt_2d, norm_mean, norm_std)
+                # Extract slices
+                pre_2d = np.take(phases[pre_phase], slice_idx, axis=axis)
+                gt_2d = np.take(phases[global_peak_phase], slice_idx, axis=axis)
+                mask_out = np.rint(mask_2d).astype(np.int16)
 
-            # Rotate 90° CCW
-            pre_norm = np.rot90(pre_norm, k=1)
-            gt_norm = np.rot90(gt_norm, k=1)
-            mask_out = np.rot90(mask_out, k=1)
+                # Z-score normalize
+                pre_norm = zscore(pre_2d, norm_mean, norm_std)
+                gt_norm = zscore(gt_2d, norm_mean, norm_std)
 
-            fname = f"{patient_id}_p{phase_num}"
-            sitk.WriteImage(sitk.GetImageFromArray(pre_norm), str(mha_input_dir / f"{fname}.mha"))
-            sitk.WriteImage(sitk.GetImageFromArray(gt_norm), str(mha_gt_dir / f"{fname}.mha"))
-            sitk.WriteImage(sitk.GetImageFromArray(mask_out), str(mha_mask_dir / f"{fname}.mha"))
-            n_extracted += 1
+                # Rotate 90° CCW
+                pre_norm = np.rot90(pre_norm, k=1)
+                gt_norm = np.rot90(gt_norm, k=1)
+                mask_out = np.rot90(mask_out, k=1)
+
+                sitk.WriteImage(sitk.GetImageFromArray(pre_norm), str(mha_input_dir / f"{fname}.mha"))
+                sitk.WriteImage(sitk.GetImageFromArray(gt_norm), str(mha_gt_dir / f"{fname}.mha"))
+                sitk.WriteImage(sitk.GetImageFromArray(mask_out), str(mha_mask_dir / f"{fname}.mha"))
+                n_extracted += 1
 
         return patient_id, n_extracted
 
