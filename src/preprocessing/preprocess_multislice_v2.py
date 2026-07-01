@@ -8,12 +8,7 @@ For each patient:
 3. Output: pre-contrast slice + corresponding peak slice (from the overall
    peak phase) at the SAME slice position as the per-phase maximum.
 
-This gives N samples per patient (N = number of unique peak slices across
-post-contrast phases), each capturing the slice where a specific phase shows
-the strongest tumour enhancement.
-
-Output naming:
-    {patient_id}_p{phase_num}.mha   — one per phase (deduplicated by slice position)
+Optimised with vectorised slice search (no Python loops over slices).
 
 Usage:
     python preprocess_multislice_v2.py \
@@ -61,23 +56,33 @@ def determine_slice_axis(shape: Tuple[int, ...]) -> int:
     return next(axes[0] for axes in size_to_axes.values() if len(axes) == 1)
 
 
-def find_peak_slice_for_phase(volume: np.ndarray, seg: np.ndarray, axis: int) -> Tuple[int, float]:
-    """Find the slice with highest mean tumour intensity in a given phase volume."""
-    n_slices = volume.shape[axis]
-    best_idx = 0
-    best_val = -np.inf
+def find_peak_slice_vectorised(volume: np.ndarray, seg: np.ndarray, axis: int) -> Tuple[int, float]:
+    """Find slice with highest mean tumour intensity — fully vectorised.
 
-    for i in range(n_slices):
-        mask_2d = np.take(seg, i, axis=axis)
-        if mask_2d.sum() == 0:
-            continue
-        img_2d = np.take(volume, i, axis=axis)
-        mean_val = float(np.mean(img_2d[mask_2d > 0]))
-        if mean_val > best_val:
-            best_val = mean_val
-            best_idx = i
+    Computes sum and count of tumour voxels per slice using array ops,
+    then divides to get mean intensity per slice.
+    """
+    # Move the slice axis to position 0
+    vol = np.moveaxis(volume, axis, 0)  # (n_slices, H, W)
+    mask = np.moveaxis(seg, axis, 0) > 0  # (n_slices, H, W) boolean
 
-    return best_idx, best_val
+    # Sum of intensities within mask per slice
+    masked_vol = np.where(mask, vol, 0.0)
+    slice_sums = masked_vol.reshape(vol.shape[0], -1).sum(axis=1)
+
+    # Count of mask voxels per slice
+    slice_counts = mask.reshape(mask.shape[0], -1).sum(axis=1)
+
+    # Mean intensity (avoid div by zero)
+    valid = slice_counts > 0
+    if not valid.any():
+        return 0, 0.0
+
+    means = np.full(vol.shape[0], -np.inf)
+    means[valid] = slice_sums[valid] / slice_counts[valid]
+
+    best_idx = int(np.argmax(means))
+    return best_idx, float(means[best_idx])
 
 
 def zscore(arr: np.ndarray, mean: float, std: float) -> np.ndarray:
@@ -135,7 +140,7 @@ def process_patient(
         if not post_phases:
             return patient_id, 0
 
-        # Find global peak phase
+        # Find global peak phase (vectorised)
         global_peak_phase = pre_phase
         global_peak_val = -np.inf
         for k, vol in phases.items():
@@ -146,11 +151,11 @@ def process_patient(
                     global_peak_val = m
                     global_peak_phase = k
 
-        # For each post-contrast phase, find its best slice
+        # For each post-contrast phase, find its best slice (vectorised)
         slices_extracted = set()
         n_extracted = 0
         for phase_num in post_phases:
-            peak_slice_idx, _ = find_peak_slice_for_phase(
+            peak_slice_idx, _ = find_peak_slice_vectorised(
                 phases[phase_num], tumour_seg, axis
             )
 
@@ -188,8 +193,7 @@ def process_patient(
         return patient_id, n_extracted
 
     except Exception as e:
-        logger.error(f"ERROR {patient_id}: {e}")
-        return patient_id, 0
+        return patient_id, -1
 
 
 def main():
@@ -247,14 +251,18 @@ def main():
     )
 
     total_slices = 0
+    errors = 0
     with mp.Pool(processes=n_workers) as pool:
         results = pool.imap_unordered(worker_fn, patients)
         for i, (pid, n) in enumerate(results, 1):
-            total_slices += n
+            if n < 0:
+                errors += 1
+            else:
+                total_slices += n
             if i % 50 == 0 or i == len(patients):
-                logger.info(f"  Progress: {i}/{len(patients)} patients, {total_slices} slices so far")
+                logger.info(f"  Progress: {i}/{len(patients)} patients, {total_slices} slices, {errors} errors")
 
-    logger.info(f"\nDone. {total_slices} total slices from {len(patients)} patients → {output_dir}")
+    logger.info(f"\nDone. {total_slices} total slices from {len(patients)} patients ({errors} errors) → {output_dir}")
 
 
 if __name__ == "__main__":
