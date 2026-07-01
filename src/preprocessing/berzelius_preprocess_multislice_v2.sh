@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH -A berzelius-2025-422
 #SBATCH -p berzelius
+#SBATCH --gpus=1
 #SBATCH --cpus-per-task=32
-#SBATCH --mem=128G
 #SBATCH -t 1:00:00
 #SBATCH -J preprocess_multislice_v2
 #SBATCH -o /proj/berzbiomedicalimagingkth/users/x_honji/preprocess_v2_%j.log
