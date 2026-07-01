@@ -103,9 +103,17 @@ def process_patient(
     min_mask_area: int,
     skip_ambiguous: bool,
 ) -> Tuple[str, int]:
-    """Process a single patient. Returns (patient_id, num_slices_extracted)."""
+    """Process a single patient. Returns (patient_id, num_slices_extracted).
+    
+    Supports resume: skips patients whose output files already exist.
+    """
     patient_id = patient_dir.name
     try:
+        # Check if this patient already has output (resume support)
+        # A patient is considered done if any _p* file exists for it
+        existing = list(mha_input_dir.glob(f"{patient_id}_p*.mha"))
+        if existing:
+            return patient_id, len(existing)
         # Load all phases
         phase_files = sorted(patient_dir.glob(f"{patient_id}_*.nii.gz"))
         if len(phase_files) < 2:
