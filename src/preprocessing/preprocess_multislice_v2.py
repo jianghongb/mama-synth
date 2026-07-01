@@ -188,7 +188,7 @@ def process_patient(
 
                 # Extract slices
                 pre_2d = np.take(phases[pre_phase], slice_idx, axis=axis)
-                gt_2d = np.take(phases[global_peak_phase], slice_idx, axis=axis)
+                gt_2d = np.take(phases[phase_num], slice_idx, axis=axis)
                 mask_out = np.rint(mask_2d).astype(np.int16)
 
                 # Z-score normalize
