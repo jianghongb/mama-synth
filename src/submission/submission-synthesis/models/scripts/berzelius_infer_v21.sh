@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH -A berzelius-2025-422
+#SBATCH -A berzelius-2026-192
 #SBATCH -p berzelius
 #SBATCH --gpus=1
 #SBATCH -t 2:00:00
