@@ -1328,3 +1328,40 @@ VRAM estimate (train bs=8): ~42 GB — A100 OK
 2. 如果 gate map 合理 (肿瘤区域亮，正常组织暗) → 尝试 gate 作为 soft attention 用于 ensemble
 3. v30 + SDEdit refiner (v31?) → 在 gate 区域内做 diffusion 精修
 4. 如果 v30 base 好于 v26 → 做 K-Fold v30 ensemble
+
+---
+
+## 24. v27: Spatial Weighting 实验 (SAFE-Diff 启发)
+
+**动机**: SAFE-Diff 论文使用 background=1, breast=20, tumor=1000 的空间加权策略。
+尝试将此策略应用到我们的 GAN loss 中，替代二元 breast mask。
+
+**两次实验对比**:
+
+| 配置 | sw_breast | sw_tumor | 数据 |
+|------|-----------|----------|------|
+| v27a (第一次) | 20 | 1000 | data_split_v4 |
+| v27b (第二次) | 5 | 500 | data_multislice |
+
+**结果**:
+
+| Metric | v22 (baseline) | v26 (best) | v27a (1/20/1000) | v27b (1/5/500) |
+|--------|:-:|:-:|:-:|:-:|
+| MSE ↓ | 0.196 | **0.181** | 0.298 | 0.295 |
+| LPIPS ↓ | 0.101 | **0.100** | 0.116 | 0.108 |
+| Dice ↑ | 0.720 | **0.730** | 0.699 | 0.708 |
+| HD95 ↓ | **57.4** | 63.3 | 64.7 | 73.5 |
+| SSIM-tumor ↑ | 0.698 | 0.713 | 0.744 | **0.746** |
+| FRD ↓ | 12.70 | **12.47** | **11.92** | 12.74 |
+
+**分析**:
+- ✅ SSIM-tumor 最高 (0.746) — 空间加权确实改善 tumor 区域重建质量
+- ✅ FRD 改善 (v27a: 11.92) — radiomics 特征更接近真实
+- ⚠️ MSE 大幅退步 (0.295-0.298) — 权重比太极端，模型忽略全图精度
+- ⚠️ 第二次缩小权重比 (500 vs 1000) 改善有限
+
+**结论**: Spatial weighting 对 tumor 区域有帮助，但当前实现的权重比太大。
+建议: 在 v26 (ngf=96) 基础上只加大 `--tumor_weight 50` (不用 spatial_weight 机制)，
+或使用更温和的比例 (1/3/30)。
+
+**状态**: ✅ 实验完成，方向暂搁
