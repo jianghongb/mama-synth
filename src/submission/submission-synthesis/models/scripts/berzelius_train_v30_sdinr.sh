@@ -42,18 +42,18 @@ export nnUNet_raw=$PROJ/nnUNet_raw
 export nnUNet_preprocessed=$PROJ/nnUNet_preprocessed
 export nnUNet_results=$PROJ/nnUNet_results
 
-MASK_OUTPUT=$PROJ/data_multislice/train/mha/breast_mask
+MASK_OUTPUT=$PROJ/data_multislice_v2/mha/breast_mask
 
 cd $PROJ/mama-synth/src/submission/submission-synthesis/models
 
 echo "=== Starting v30: Semi-Disentangled INR-inspired Generator ==="
 echo "Architecture: SharedEncoder + EnhancementDecoder + GateDecoder"
 echo "Formula: output = pre + gate * enhancement"
-echo "Base params from v26: ngf=96, data_multislice, tumor=10, MSSC=50"
+echo "Base params from v26: ngf=96, data_multislice_v2, tumor=10, MSSC=50"
 
 python train_semi_disentangled.py \
   --name mamasynth_v30_sdinr \
-  --dataroot $PROJ/data_multislice/train \
+  --dataroot $PROJ/data_multislice_v2/train \
   --checkpoints_dir $PROJ/checkpoints \
   --breast_mask_dir $MASK_OUTPUT \
   --ngf 96 \
@@ -88,7 +88,7 @@ echo ""
 echo "=== Inference command ==="
 echo "python infer_semi_disentangled.py \\"
 echo "  --weights $PROJ/checkpoints/mamasynth_v30_sdinr/latest_net_G.pth \\"
-echo "  --input_dir $PROJ/data_multislice/test/mha/input \\"
+echo "  --input_dir $PROJ/data_multislice_v2/test/mha/input \\"
 echo "  --output_dir $PROJ/predictions_v30_sdinr \\"
 echo "  --breast_seg_model $PROJ/nnUNet_results/Dataset920_BreastSeg2D/nnUNetTrainer__nnUNetPlans__2d \\"
 echo "  --ngf 96 --n_encoder_blocks 9 --n_enhance_blocks 3 --n_gate_blocks 2 \\"
