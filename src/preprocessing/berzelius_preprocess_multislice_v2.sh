@@ -43,3 +43,15 @@ echo ""
 echo "=== Done! ==="
 echo "Output files:"
 ls $PROJ/data_multislice_v2/mha/input/ | wc -l
+
+echo ""
+echo "=== Splitting into train/test ==="
+python src/preprocessing/split_data_multislice_v2.py \
+    --data_dir $PROJ/data_multislice_v2 \
+    --splits_csv /proj/berzbiomedicalimagingkth/users/x_honji/data_multislice/train_test_split.csv
+
+echo ""
+echo "Train files:"
+ls $PROJ/data_multislice_v2/train/mha/input/ | wc -l
+echo "Test files:"
+ls $PROJ/data_multislice_v2/test/mha/input/ | wc -l

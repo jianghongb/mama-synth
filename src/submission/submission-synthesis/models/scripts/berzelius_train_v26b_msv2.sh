@@ -39,7 +39,7 @@ python train.py \
   --name mamasynth_v26b \
   --model pix2pixHD \
   --dataset_mode mha \
-  --dataroot $PROJ/data_multislice_v2 \
+  --dataroot $PROJ/data_multislice_v2/train \
   --checkpoints_dir $PROJ/checkpoints \
   --label_nc 0 \
   --input_nc 1 \
