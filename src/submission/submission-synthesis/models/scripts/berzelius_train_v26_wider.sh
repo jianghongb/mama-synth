@@ -25,16 +25,16 @@ conda activate $PROJ/envs/gan
 
 pip show torchmetrics > /dev/null 2>&1 || pip install torchmetrics
 
-MASK_OUTPUT=$PROJ/data_multislice/train/mha/breast_mask
+MASK_OUTPUT=$PROJ/data_multislice_v2/train/mha/breast_mask
 
-echo "=== Starting v26 training (n_blocks=12, ngf=96, data_multislice) ==="
+echo "=== Starting v26 training (n_blocks=12, ngf=96, data_multislice_v2) ==="
 cd $PROJ/mama-synth/src/submission/submission-synthesis/models
 
 python train.py \
   --name mamasynth_v26 \
   --model pix2pixHD \
   --dataset_mode mha \
-  --dataroot $PROJ/data_multislice/train \
+  --dataroot $PROJ/data_multislice_v2/train \
   --checkpoints_dir $PROJ/checkpoints \
   --label_nc 0 \
   --input_nc 1 \
