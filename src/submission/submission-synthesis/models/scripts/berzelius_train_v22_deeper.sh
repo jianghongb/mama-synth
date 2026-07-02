@@ -3,15 +3,14 @@
 #SBATCH -p berzelius
 #SBATCH --gpus=1
 #SBATCH -t 48:00:00
-#SBATCH -J v22_d930
+#SBATCH -J v30_noise
 #SBATCH -o /proj/berzbiomedicalimagingkth/users/x_honji/train_%j.log
 #SBATCH -e /proj/berzbiomedicalimagingkth/users/x_honji/train_%j.err
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=hongjia@kth.se
 #
-# v22: Deeper network (n_blocks=12 vs v20's 9)
-# Base: v20 config (Dataset920 2D mask, axial-only 2528 cases)
-# Change: n_blocks_global 9 → 12
+# v30: v22 config (n_blocks=12) + data_multislice_v2 + noise_aug
+# Same architecture as v22 but with per-phase peak slice data and noise augmentation.
 
 PROJ=/proj/berzbiomedicalimagingkth/users/x_honji
 
@@ -26,20 +25,17 @@ conda activate $PROJ/envs/gan
 
 pip show torchmetrics > /dev/null 2>&1 || pip install torchmetrics
 
-export nnUNet_raw=$PROJ/nnUNet_raw
-export nnUNet_preprocessed=$PROJ/nnUNet_preprocessed
-export nnUNet_results=$PROJ/nnUNet_results
-
-MASK_OUTPUT=$PROJ/data_split_v4/train/mha/breast_mask_930
+cd $PROJ/mama-synth
+git pull origin dev
 
 cd $PROJ/mama-synth/src/submission/submission-synthesis/models
 
-echo "=== Starting v22 training (n_blocks=12) ==="
+echo "=== Starting v30 training (v22 + data_multislice_v2 + noise_aug) ==="
 python train.py \
-  --name mamasynth_v22 \
+  --name mamasynth_v30 \
   --model pix2pixHD \
   --dataset_mode mha \
-  --dataroot $PROJ/data_split_v4/train \
+  --dataroot $PROJ/data_multislice_v2/train \
   --checkpoints_dir $PROJ/checkpoints \
   --label_nc 0 \
   --input_nc 1 \
@@ -47,6 +43,7 @@ python train.py \
   --no_instance \
   --residual_mode \
   --intensity_aug \
+  --noise_aug \
   --resize_or_crop resize \
   --loadSize 512 \
   --fineSize 512 \
@@ -55,6 +52,7 @@ python train.py \
   --n_blocks_global 12 \
   --norm instance \
   --batchSize 8 \
+  --nThreads 8 \
   --niter 100 \
   --niter_decay 100 \
   --lr 0.0002 \
@@ -67,9 +65,8 @@ python train.py \
   --lambda_vgg 10 \
   --num_D 2 \
   --n_layers_D 3 \
-  --breast_mask_dir $MASK_OUTPUT \
   --save_epoch_freq 5 \
   --print_freq 100 \
   --gpu_ids 0
 
-echo "Done! Weights: $PROJ/checkpoints/mamasynth_v22/latest_net_G.pth"
+echo "Done! Weights: $PROJ/checkpoints/mamasynth_v30/latest_net_G.pth"
