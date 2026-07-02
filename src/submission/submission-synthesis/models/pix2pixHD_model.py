@@ -284,9 +284,11 @@ class Pix2PixHDModel(BaseModel):
                 unc_weight = unc_weight + 980.0 * mask_gpu
             # Normalize weights
             unc_weight = unc_weight / unc_weight.mean()
-            # Heteroscedastic loss: w * exp(-log_var) * (mu - x)^2 + log_var
+            # Heteroscedastic loss: w * (exp(-log_var) * (mu - x)^2 + log_var)
+            # Note: log_var is INSIDE the weighting — prevents network from
+            # "escaping" tumor loss by predicting high uncertainty there.
             precision = torch.exp(-log_var)
-            loss_G_Unc = (unc_weight * precision * (fake_image - real_image) ** 2 + log_var).mean()
+            loss_G_Unc = (unc_weight * (precision * (fake_image - real_image) ** 2 + log_var)).mean()
 
         # Edge loss: enforce sharp boundaries (Sobel-based)
         loss_G_Edge = 0
