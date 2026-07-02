@@ -2,8 +2,20 @@
 *.tar.gz
 *.DS_Store
 *.pt
+*.pth
 *.pyc
 *__pycache__
+
+# Large data / model directories (keep out of git history)
+predictions_*/
+eval_results_*/
+weights_*/
+images/
+output/
+output_yunnan/
+nnUNet_pretrained_weights/
+predictions_kfold/
+predictions_kfold_ensemble/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
