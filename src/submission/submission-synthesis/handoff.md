@@ -1365,3 +1365,116 @@ VRAM estimate (train bs=8): ~42 GB — A100 OK
 或使用更温和的比例 (1/3/30)。
 
 **状态**: ✅ 实验完成，方向暂搁
+
+---
+
+## 25. v28: UC-GAN (Uncertainty-Conditioned GAN)
+
+**动机**: SAFE-Diff 启发 — 让 Generator 输出 (μ, log_var)，Discriminator 只判断高置信区域，迫使 G 对不确定区域诚实。
+
+**架构**: GlobalGenerator (ngf=64, n_blocks=12) + uncertainty 双头输出
+- `shared`: encoder + ResBlocks (共享特征)
+- `mean_head`: 输出增强残差 μ
+- `log_var_head`: 输出像素级 log 方差 (clamped [-1.5, 3.0])
+- Discriminator 只评估 confidence = exp(-log_var) 加权的区域
+
+**配置**:
+| 参数 | 值 |
+|---|---|
+| netG | global + uncertainty |
+| ngf | 64 |
+| n_blocks | 12 |
+| data | data_multislice/train |
+| breast_mask | ✅ |
+| intensity_aug | ✅ |
+| batchSize | 16 |
+| epochs | 200 (100+100) |
+| 其余 loss | 同 v22 |
+
+**结果 (data_split/test, 199 cases)**:
+| MSE ↓ | LPIPS ↓ | SSIM_tumor ↑ | FRD ↓ | Dice ↑ | HD95 ↓ |
+|---|---|---|---|---|---|
+| 1.43 | 0.137 | 0.617 | 13.44 | 0.512 | 168.98 |
+
+**分析**: 比 v22 差。Uncertainty 使网络偏保守，tumor 区域增强不足。MSE 和 Dice 都下降。
+
+**状态**: ✅ 完成 — 不采用
+
+---
+
+## 26. v29: Swin Transformer Bottleneck
+
+**动机**: 在 ResBlocks 中间插入 Swin Transformer 捕获长距离解剖依赖（如双侧乳房对称性），在 32×32 特征分辨率上操作。
+
+**架构**: GlobalGenerator (ngf=64, n_blocks=12) + 2 Swin blocks
+- 在 12 个 ResBlocks 中间插入 W-MSA + SW-MSA
+- window_size=8
+- 特征分辨率 32×32 (512/2^4)
+
+**配置**:
+| 参数 | 值 |
+|---|---|
+| netG | global + swin_bottleneck |
+| ngf | 64 |
+| n_blocks | 12 |
+| data | data_multislice/train |
+| breast_mask | ✅ |
+| intensity_aug | ✅ |
+| batchSize | 16 |
+| epochs | 200 |
+| 其余 loss | 同 v22 |
+
+**脚本**: `berzelius_train_v29_swin.sh`
+
+**状态**: ⏳ 待验证
+
+---
+
+## 27. v30: Semi-Disentangled INR-inspired Generator (SD-INR)
+
+**动机**: 分解合成为 anatomy-lock + gated enhancement，灵感来自 INR 的坐标→强度映射。
+
+**核心公式**:
+```
+output = pre + gate(x,y) × enhancement(x,y)
+```
+- `SharedEncoder`: 从 pre-contrast 提取特征
+- `EnhancementDecoder` (重, skip connections): 预测强度增量 Δ
+- `GateDecoder` (轻, smooth): 预测空间注意力 [0,1]
+- `breast_mask` 硬约束: gate=0 outside breast
+
+**预期优势**:
+- 无背景幻觉 (gate × breast_mask 杀死胸壁区域)
+- 更好的 tumor 保真度 (所有容量集中在 enhancement)
+- 更低的 MSE 方差 (anatomy lock 消除强度漂移)
+
+**配置**:
+| 参数 | 值 |
+|---|---|
+| 训练脚本 | `train_semi_disentangled.py` |
+| ngf | 96 |
+| n_downsampling | 4 |
+| n_encoder_blocks | 9 |
+| n_enhance_blocks | 3 |
+| n_gate_blocks | 2 |
+| data | data_multislice_v2/train |
+| breast_mask | ✅ (hard constraint) |
+| batchSize | 8 |
+| epochs | 200 |
+
+**Loss**:
+| Loss | λ |
+|---|---|
+| enhance_l1 | 10.0 |
+| anatomy | 5.0 |
+| gate_sparsity | 0.5 |
+| gate_tv | 0.1 |
+| tumor | 10.0 |
+| vgg | 10.0 |
+| gan | 1.0 |
+| feat | 10.0 |
+| mssc | 50.0 |
+
+**脚本**: `berzelius_train_v30_sdinr.sh`
+
+**状态**: ⏳ 待验证
