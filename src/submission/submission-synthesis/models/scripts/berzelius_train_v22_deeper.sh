@@ -3,14 +3,14 @@
 #SBATCH -p berzelius
 #SBATCH --gpus=1
 #SBATCH -t 48:00:00
-#SBATCH -J v30_noise
+#SBATCH -J v22_msv2
 #SBATCH -o /proj/berzbiomedicalimagingkth/users/x_honji/train_%j.log
 #SBATCH -e /proj/berzbiomedicalimagingkth/users/x_honji/train_%j.err
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=hongjia@kth.se
 #
-# v30: v22 config (n_blocks=12) + data_multislice_v2 + noise_aug
-# Same architecture as v22 but with per-phase peak slice data and noise augmentation.
+# v22: Deeper network (n_blocks=12 vs v20's 9)
+# Retrained on data_multislice_v2 with noise augmentation.
 
 PROJ=/proj/berzbiomedicalimagingkth/users/x_honji
 
@@ -30,9 +30,9 @@ git pull origin dev
 
 cd $PROJ/mama-synth/src/submission/submission-synthesis/models
 
-echo "=== Starting v30 training (v22 + data_multislice_v2 + noise_aug) ==="
+echo "=== Starting v22 training (n_blocks=12, data_multislice_v2, noise_aug) ==="
 python train.py \
-  --name mamasynth_v30 \
+  --name mamasynth_v22 \
   --model pix2pixHD \
   --dataset_mode mha \
   --dataroot $PROJ/data_multislice_v2/train \
@@ -52,7 +52,6 @@ python train.py \
   --n_blocks_global 12 \
   --norm instance \
   --batchSize 8 \
-  --nThreads 8 \
   --niter 100 \
   --niter_decay 100 \
   --lr 0.0002 \
@@ -69,4 +68,4 @@ python train.py \
   --print_freq 100 \
   --gpu_ids 0
 
-echo "Done! Weights: $PROJ/checkpoints/mamasynth_v30/latest_net_G.pth"
+echo "Done! Weights: $PROJ/checkpoints/mamasynth_v22/latest_net_G.pth"
