@@ -117,6 +117,15 @@ class MhaDataset(BaseDataset):
             input_t = input_t * scale + bias
             gt_t = gt_t * scale + bias
 
+        # Noise augmentation: input noise + GT jitter
+        if self.opt.isTrain and getattr(self.opt, 'noise_aug', False):
+            # Input: mild Gaussian noise (σ=0.02-0.05) — simulates acquisition noise
+            input_sigma = 0.02 + torch.rand(1).item() * 0.03
+            input_t = input_t + input_sigma * torch.randn_like(input_t)
+            # GT: intensity jitter (σ=0.02-0.08) — robustness to phase timing variation
+            gt_sigma = 0.02 + torch.rand(1).item() * 0.06
+            gt_t = gt_t + gt_sigma * torch.randn_like(gt_t)
+
         # Load breast mask (precomputed or threshold)
         breast_mask_t = None
         if self.dir_breast_mask and os.path.exists(os.path.join(self.dir_breast_mask, fname)):

@@ -83,6 +83,7 @@ class BaseOptions():
         self.parser.add_argument('--sw_breast', type=float, default=5.0, help='spatial weight for breast region')
         self.parser.add_argument('--sw_tumor', type=float, default=50.0, help='spatial weight for tumor region')
         self.parser.add_argument('--intensity_aug', action='store_true', help='random intensity scale/bias augmentation for generalization')
+        self.parser.add_argument('--noise_aug', action='store_true', help='Gaussian noise on input (σ=0.02-0.05) and GT jitter (σ=0.02-0.08)')
 
         self.initialized = True
 
