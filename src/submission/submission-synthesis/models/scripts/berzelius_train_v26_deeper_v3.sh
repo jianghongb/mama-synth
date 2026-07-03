@@ -56,11 +56,11 @@ python train.py \
   --ngf 96 \
   --n_blocks_global 12 \
   --norm instance \
-  --batchSize 8 \
+  --batchSize 12 \
   --nThreads 16 \
   --niter 100 \
   --niter_decay 100 \
-  --lr 0.0002 \
+  --lr 0.00025 \
   --lambda_feat 10 \
   --lambda_gan 1.0 \
   --tumor_weight 10 \
