@@ -1543,6 +1543,66 @@ output = pre + gate(x,y) × enhancement(x,y)
 
 ### 下一步
 
-1. **v30 (Semi-Disentangled)** 在 data_multislice_v2 上训练中 → 预期也会受数据量影响
-2. 考虑在**旧 data_multislice**（23k slices）上训练 v30 → 公平对比 v26
-3. 或者 data_multislice_v2 恢复邻居 slice → 重训 v26b 确认是数据量问题
+1. **v22 retrain (v30)** — v22 配置 + data_multislice_v2 + LAB data + noise_aug + breast_mask, batch=16, lr=0.0003
+2. **v31 (Swin + UC-GAN)** — v28+v29 合并，在新数据上训练，备用方案
+3. 考虑在**旧 data_multislice**（23k slices）上重训 → 确认是数据量问题还是数据质量问题
+4. data_multislice_v2 恢复邻居 slice → 增大训练量
+
+---
+
+## 28. v30: v22 Retrain on data_multislice_v2 + LA-Breast + noise_aug
+
+**动机**: v22 是最强单模型，在新数据集上重训并加入：
+1. LA-Breast 外部数据（+3670 samples）
+2. noise_aug（input σ=0.02-0.05, GT σ=0.02-0.08）
+3. breast mask (Dataset930)
+4. 优化 GPU 利用率（batch=16, nThreads=16）
+
+**配置**:
+
+| 参数 | v22 (原) | v30 (新) |
+|------|---------|---------|
+| 数据 | data_split_v4 (2528 axial) | data_multislice_v2/train (~8.9k, 含 LAB) |
+| Breast mask | Dataset920 | Dataset930 |
+| noise_aug | ❌ | ✅ (input σ=0.02-0.05, GT σ=0.02-0.08) |
+| intensity_aug | ✅ | ✅ |
+| batchSize | 8 | 16 |
+| nThreads | 0 | 16 |
+| lr | 0.0002 | 0.0003 |
+| ngf | 64 | 64 |
+| n_blocks | 12 | 12 |
+| residual_mode | ✅ | ✅ |
+| epochs | 200 | 200 |
+
+**训练数据构成**:
+| 来源 | Samples | 说明 |
+|------|---------|------|
+| MAMA-MIA (DUKE/ISPY2/YUNNAN/NACT) | 5227 | per-phase peak slice, motion excluded |
+| LA-Breast (d1-d5) | 3670 | 5 post-contrast phases, 734 slices |
+| **合计** | **~8897** | |
+
+**脚本**: `berzelius_train_v22_deeper.sh` (名字沿用，内容已更新为 v30 配置)
+**Checkpoint**: `$PROJ/checkpoints/mamasynth_v22/latest_net_G.pth`
+
+**状态**: ⏳ 训练中（Berzelius job 17019506）
+
+---
+
+## 29. v31: Swin + UC-GAN Combined (备用)
+
+**动机**: 合并 v28 (UC-GAN uncertainty) 和 v29 (Swin Transformer bottleneck)。
+
+**架构**:
+```
+Input → Encoder (4× downsample)
+      → 6 ResBlocks
+      → 2 Swin Blocks (W-MSA + SW-MSA, window=8)  ← 长距离依赖
+      → 6 ResBlocks
+      → Shared features
+          ├── mean_head → μ (enhancement)     ← uncertainty dual-head
+          └── log_var_head → log σ²
+```
+
+**配置**: 同 v30 但加 `--uncertainty --swin_bottleneck`
+**脚本**: `berzelius_train_v31_swin_ucgan.sh`
+**状态**: 待 v30 结果后决定是否训练
