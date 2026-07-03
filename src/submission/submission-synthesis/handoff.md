@@ -1510,10 +1510,14 @@ output = pre + gate(x,y) × enhancement(x,y)
 | 训练数据 | data_multislice (~23k) | data_multislice_v2 (~5.2k) | data_multislice_v2 (~5.2k) | data_multislice_v2 (~5.2k) |
 | ngf | 96 | 96 | 64 | 64 |
 | n_blocks | 12 | 12 | 12 | 12 |
-| Breast mask | Dataset920 | Dataset930 | Dataset930 | Dataset930 |
+| Breast mask | Dataset920 | ❌ **无** (训练时未配置) | Dataset930 | Dataset930 |
 | 特殊改动 | — | — | UC-GAN uncertainty head | Swin Transformer bottleneck |
 | batchSize | 8 | 8 | 16 | 16 |
 | 训练时间 | ~23h | ~23h | ~16h | ~17h |
+
+> ⚠️ **v26b 缺少 breast mask**: 训练时 `--breast_mask_dir` 未配置，loss 未限制在乳房区域。
+> 已修复脚本 (commit 35b603f)，但该版本的 checkpoint 是无 mask 训练的结果。
+> 如需带 mask 版本需重新训练。
 
 ### 分析
 
