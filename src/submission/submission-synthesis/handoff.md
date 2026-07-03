@@ -1478,3 +1478,67 @@ output = pre + gate(x,y) × enhancement(x,y)
 **脚本**: `berzelius_train_v30_sdinr.sh`
 
 **状态**: ⏳ 待验证
+
+---
+
+## 26. data_multislice_v2 评估对比 (2026-07-02)
+
+### 数据集说明
+
+| | data_multislice (旧) | data_multislice_v2 (新) |
+|---|---|---|
+| 训练 slices | 多 slice/phase (含 s±1, s±2 邻居) | 中心 slice only (删除邻居) |
+| 训练 files | ~23k | ~5.2k |
+| Test files | — | 262 (中心 slice, 5% per dataset) |
+| Breast mask | Dataset920 (distilled 2D) | Dataset930 (BreastDivider distilled 2D) |
+| Phase 策略 | 每 case 多 phase 多 slice | 每 case 多 phase 1 slice |
+
+### 评估结果 (data_multislice_v2 test, 262 cases)
+
+| Metric | **v26** (旧数据训) | **v26b** (新数据训) | **v28b** (UC-GAN, 新) | **v29b** (Swin, 新) |
+|--------|:---:|:---:|:---:|:---:|
+| MSE ↓ | **0.573** | 0.744 | 0.780 | 0.780 |
+| LPIPS ↓ | **0.127** | 0.137 | 0.151 | 0.136 |
+| SSIM_tumor ↑ | **0.551** | 0.501 | 0.464 | 0.478 |
+| Dice ↑ | **0.537** | 0.417 | 0.314 | 0.386 |
+| HD95 ↓ | **110.3** | 158.2 | 214.8 | 172.3 |
+
+### 各版本配置
+
+| | v26 | v26b | v28b | v29b |
+|---|---|---|---|---|
+| 训练数据 | data_multislice (~23k) | data_multislice_v2 (~5.2k) | data_multislice_v2 (~5.2k) | data_multislice_v2 (~5.2k) |
+| ngf | 96 | 96 | 64 | 64 |
+| n_blocks | 12 | 12 | 12 | 12 |
+| Breast mask | Dataset920 | Dataset930 | Dataset930 | Dataset930 |
+| 特殊改动 | — | — | UC-GAN uncertainty head | Swin Transformer bottleneck |
+| batchSize | 8 | 8 | 16 | 16 |
+| 训练时间 | ~23h | ~23h | ~16h | ~17h |
+
+### 分析
+
+1. **v26（旧数据）全面碾压所有新数据训练版本** — 这说明训练数据量 > 架构创新：
+   - v26 训练量 ~23k slices vs v26b/v28b/v29b 只有 ~5.2k slices（少了 77%）
+   - 邻居 slice (s±1, s±2) 虽然信息冗余，但作为 data augmentation 极其有效
+
+2. **v26b vs v26**: 同架构 (ngf=96, blocks=12)，唯一区别是训练数据量 → 数据量砍到 1/4 后 Dice 从 0.537 降到 0.417（-22%）
+
+3. **v28b (UC-GAN) 依然最差**: uncertainty head 在不同数据集上都失败，结论一致：不采用
+
+4. **v29b (Swin) 略好于 v28b**: LPIPS 接近 v26b (0.136 vs 0.137)，但 Dice/HD95 差距大
+
+5. **ngf 差异不能忽视**: v26/v26b 用 ngf=96，v28b/v29b 用 ngf=64 → 容量差 ~2.5×
+
+### 结论与决策
+
+- ❌ **不应该删除邻居 slice** — 多 slice augmentation 对模型性能至关重要
+- ❌ **UC-GAN (v28) 方案废弃** — 两个数据集上都失败
+- ⚠️ **Swin (v29) 需要在 ngf=96 下重测** 才能公平对比
+- ✅ **v26 仍然是最强单模型** — 在新旧 test set 上都最优
+- 🔄 **data_multislice_v2 需要重新包含邻居 slice** 或直接用 data_multislice 继续开发
+
+### 下一步
+
+1. **v30 (Semi-Disentangled)** 在 data_multislice_v2 上训练中 → 预期也会受数据量影响
+2. 考虑在**旧 data_multislice**（23k slices）上训练 v30 → 公平对比 v26
+3. 或者 data_multislice_v2 恢复邻居 slice → 重训 v26b 确认是数据量问题
