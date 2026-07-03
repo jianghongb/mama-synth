@@ -3,7 +3,6 @@
 #SBATCH -p berzelius
 #SBATCH --gpus=1
 #SBATCH --cpus-per-task=16
-#SBATCH --mem=64G
 #SBATCH -t 48:00:00
 #SBATCH -J v22_msv2
 #SBATCH -o /proj/berzbiomedicalimagingkth/users/x_honji/train_%j.log
@@ -12,7 +11,7 @@
 #SBATCH --mail-user=hongjia@kth.se
 #
 # v22: Deeper network (n_blocks=12) + data_multislice_v2 + noise_aug + LAB data.
-# Optimized: batch=32, nThreads=16, preload data to /tmp for fast I/O.
+# Optimized: batch=32, nThreads=16, lr scaled.
 
 PROJ=/proj/berzbiomedicalimagingkth/users/x_honji
 
@@ -30,21 +29,17 @@ pip show torchmetrics > /dev/null 2>&1 || pip install torchmetrics
 cd $PROJ/mama-synth
 git pull origin dev
 
-# Copy data to local SSD for faster I/O
-echo "=== Copying data to local /tmp for fast I/O ==="
-LOCAL_DATA=/tmp/mamasynth_train
-mkdir -p $LOCAL_DATA
-rsync -a $PROJ/data_multislice_v2/train/mha/ $LOCAL_DATA/mha/
-echo "Data copied: $(ls $LOCAL_DATA/mha/input/*.mha | wc -l) files"
-
 cd $PROJ/mama-synth/src/submission/submission-synthesis/models
 
 echo "=== Starting v22 training (n_blocks=12, batch=32, nThreads=16) ==="
+echo "Dataset: $PROJ/data_multislice_v2/train"
+echo "Samples: $(ls $PROJ/data_multislice_v2/train/mha/input/*.mha 2>/dev/null | wc -l)"
+
 python train.py \
   --name mamasynth_v22 \
   --model pix2pixHD \
   --dataset_mode mha \
-  --dataroot $LOCAL_DATA \
+  --dataroot $PROJ/data_multislice_v2/train \
   --checkpoints_dir $PROJ/checkpoints \
   --label_nc 0 \
   --input_nc 1 \
@@ -74,7 +69,7 @@ python train.py \
   --lambda_vgg 10 \
   --num_D 2 \
   --n_layers_D 3 \
-  --breast_mask_dir $LOCAL_DATA/mha/breast_mask \
+  --breast_mask_dir $PROJ/data_multislice_v2/train/mha/breast_mask \
   --save_epoch_freq 5 \
   --print_freq 100 \
   --gpu_ids 0
