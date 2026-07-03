@@ -43,7 +43,7 @@ pip show torchmetrics > /dev/null 2>&1 || pip install torchmetrics
 cd $PROJ/mama-synth
 git pull origin dev
 
-MASK_OUTPUT=$PROJ/data_multislice_v2/train/mha/breast_mask
+MASK_OUTPUT=$PROJ/data_multislice_v3/train/mha/breast_mask
 
 echo "=== Starting v31 training (per-image z-score, ngf=64, n_blocks=12, batch=16) ==="
 cd $PROJ/mama-synth/src/submission/submission-synthesis/models
@@ -52,7 +52,7 @@ python train.py \
   --name mamasynth_v31_pinorm \
   --model pix2pixHD \
   --dataset_mode mha_perimage_norm \
-  --dataroot $PROJ/data_multislice_v2/train \
+  --dataroot $PROJ/data_multislice_v3/train \
   --checkpoints_dir $PROJ/checkpoints \
   --label_nc 0 \
   --input_nc 1 \
