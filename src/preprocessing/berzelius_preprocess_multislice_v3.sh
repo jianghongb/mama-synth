@@ -7,6 +7,8 @@
 #SBATCH -J prep_msv3
 #SBATCH -o /proj/berzbiomedicalimagingkth/users/x_honji/preprocess_v3_%j.log
 #SBATCH -e /proj/berzbiomedicalimagingkth/users/x_honji/preprocess_v3_%j.err
+#SBATCH --mail-type=END,FAIL
+#SBATCH --mail-user=hongjia@kth.se
 #
 # Preprocess data_multislice_v3: peak slice ± 2, global peak phase GT.
 # Then split into train/test and generate breast masks.
