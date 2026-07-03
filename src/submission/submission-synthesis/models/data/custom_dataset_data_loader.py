@@ -7,6 +7,9 @@ def CreateDataset(opt):
     if getattr(opt, 'dataset_mode', 'aligned') == 'mha':
         from data.mha_dataset import MhaDataset
         dataset = MhaDataset()
+    elif getattr(opt, 'dataset_mode', 'aligned') == 'mha_perimage_norm':
+        from data.mha_perimage_norm_dataset import MhaPerImageNormDataset
+        dataset = MhaPerImageNormDataset()
     elif getattr(opt, 'dataset_mode', 'aligned') == 'mha_baseline':
         from data.mha_baseline_dataset import MhaBaselineDataset
         dataset = MhaBaselineDataset()
