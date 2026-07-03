@@ -2,6 +2,8 @@
 #SBATCH -A berzelius-2026-192
 #SBATCH -p berzelius
 #SBATCH --gpus=1
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=64G
 #SBATCH -t 48:00:00
 #SBATCH -J v22_msv2
 #SBATCH -o /proj/berzbiomedicalimagingkth/users/x_honji/train_%j.log
@@ -9,8 +11,8 @@
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=hongjia@kth.se
 #
-# v22: Deeper network (n_blocks=12 vs v20's 9)
-# Retrained on data_multislice_v2 with noise augmentation.
+# v22: Deeper network (n_blocks=12) + data_multislice_v2 + noise_aug + LAB data.
+# Optimized: batch=32, nThreads=16, preload data to /tmp for fast I/O.
 
 PROJ=/proj/berzbiomedicalimagingkth/users/x_honji
 
@@ -28,14 +30,21 @@ pip show torchmetrics > /dev/null 2>&1 || pip install torchmetrics
 cd $PROJ/mama-synth
 git pull origin dev
 
+# Copy data to local SSD for faster I/O
+echo "=== Copying data to local /tmp for fast I/O ==="
+LOCAL_DATA=/tmp/mamasynth_train
+mkdir -p $LOCAL_DATA
+rsync -a $PROJ/data_multislice_v2/train/mha/ $LOCAL_DATA/mha/
+echo "Data copied: $(ls $LOCAL_DATA/mha/input/*.mha | wc -l) files"
+
 cd $PROJ/mama-synth/src/submission/submission-synthesis/models
 
-echo "=== Starting v22 training (n_blocks=12, data_multislice_v2, noise_aug) ==="
+echo "=== Starting v22 training (n_blocks=12, batch=32, nThreads=16) ==="
 python train.py \
   --name mamasynth_v22 \
   --model pix2pixHD \
   --dataset_mode mha \
-  --dataroot $PROJ/data_multislice_v2/train \
+  --dataroot $LOCAL_DATA \
   --checkpoints_dir $PROJ/checkpoints \
   --label_nc 0 \
   --input_nc 1 \
@@ -51,10 +60,11 @@ python train.py \
   --ngf 64 \
   --n_blocks_global 12 \
   --norm instance \
-  --batchSize 8 \
+  --batchSize 32 \
+  --nThreads 16 \
   --niter 100 \
   --niter_decay 100 \
-  --lr 0.0002 \
+  --lr 0.0004 \
   --lambda_feat 10 \
   --lambda_gan 1.0 \
   --tumor_weight 10 \
@@ -64,7 +74,7 @@ python train.py \
   --lambda_vgg 10 \
   --num_D 2 \
   --n_layers_D 3 \
-  --breast_mask_dir $PROJ/data_multislice_v2/train/mha/breast_mask \
+  --breast_mask_dir $LOCAL_DATA/mha/breast_mask \
   --save_epoch_freq 5 \
   --print_freq 100 \
   --gpu_ids 0
