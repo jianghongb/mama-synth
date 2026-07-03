@@ -40,7 +40,7 @@ def main():
                         help='Pre-computed breast masks (same filenames as input)')
     parser.add_argument('--breast_mask_thresh', type=float, default=-0.3,
                         help='Threshold for breast mask if no pre-computed masks')
-    parser.add_argument('--ngf', type=int, default=96)
+    parser.add_argument('--ngf', type=int, default=64)
     parser.add_argument('--n_blocks', type=int, default=12)
     parser.add_argument('--n_downsampling', type=int, default=4)
     parser.add_argument('--device', default='cuda')

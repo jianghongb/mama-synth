@@ -2,6 +2,7 @@
 #SBATCH -A berzelius-2026-192
 #SBATCH -p berzelius
 #SBATCH --gpus=1
+#SBATCH --cpus-per-task=16
 #SBATCH -t 48:00:00
 #SBATCH -J v31_pinorm
 #SBATCH -o /proj/berzbiomedicalimagingkth/users/x_honji/train_%j.log
@@ -22,7 +23,7 @@
 # At inference:
 #   input_gc → per-image normalize → model → de-normalize back to GC space
 #
-# Base: v26 architecture (ngf=96, n_blocks=12)
+# Base: v22 architecture (ngf=64, n_blocks=12, batch=16, noise_aug, lr=0.0003)
 # Data: data_multislice_v2/train (with breast mask)
 # Key change: --dataset_mode mha_perimage_norm
 
@@ -39,9 +40,12 @@ conda activate $PROJ/envs/gan
 
 pip show torchmetrics > /dev/null 2>&1 || pip install torchmetrics
 
+cd $PROJ/mama-synth
+git pull origin dev
+
 MASK_OUTPUT=$PROJ/data_multislice_v2/train/mha/breast_mask
 
-echo "=== Starting v31 training (per-image z-score, ngf=96, n_blocks=12) ==="
+echo "=== Starting v31 training (per-image z-score, ngf=64, n_blocks=12, batch=16) ==="
 cd $PROJ/mama-synth/src/submission/submission-synthesis/models
 
 python train.py \
@@ -56,18 +60,19 @@ python train.py \
   --no_instance \
   --residual_mode \
   --intensity_aug \
+  --noise_aug \
   --resize_or_crop resize \
   --loadSize 512 \
   --fineSize 512 \
   --n_downsample_global 4 \
-  --ngf 96 \
+  --ngf 64 \
   --n_blocks_global 12 \
   --norm instance \
-  --batchSize 8 \
-  --nThreads 8 \
+  --batchSize 16 \
+  --nThreads 16 \
   --niter 100 \
   --niter_decay 100 \
-  --lr 0.0002 \
+  --lr 0.0003 \
   --lambda_feat 10 \
   --lambda_gan 1.0 \
   --tumor_weight 10 \
