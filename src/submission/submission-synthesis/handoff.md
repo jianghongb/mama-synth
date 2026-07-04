@@ -1622,6 +1622,45 @@ output = pre + gate(x,y) × enhancement(x,y)
 - AUROC 和 Dice 我们有优势 — contrast signal 和 tumor detection OK
 - **优先改善方向**: 降 MSE 和 LPIPS → v26_v3 (ngf=96) 或 SDEdit refiner
 
+### 降低 MSE 和 LPIPS 的方向
+
+#### 数据层面
+- **移除 LAB 数据训练** — LAB intensity range 小，可能让模型学到偏保守输出
+- **增大训练量** — 当前 7k，data_multislice v1 有 23k，数据量对 MSE 影响大
+- **检查 test set outliers** — 少数极高 MSE case 拉高平均
+
+#### 模型层面
+
+| 方案 | 预期改善 | 代价 | 状态 |
+|------|---------|------|------|
+| ngf=96 (v26_v3) | MSE -5-10% | 训练 2x | ⏳ 训练中 |
+| SDEdit refiner | LPIPS -10-15% | +5s 推理 | 待 base 模型确定后 |
+| n_blocks 12→15 | MSE -3-5% | 轻微增加训练时间 | 待尝试 |
+| 去掉 noise_aug | MSE 可能改善 | 泛化性下降 | 待 ablation |
+
+#### Loss 层面
+
+| 方案 | 目标 | 做法 | 状态 |
+|------|------|------|------|
+| 加大 VGG loss | 降 LPIPS | `lambda_vgg 10→20` | ⏳ v22_vgg20 训练中 |
+| 减 MSSC 权重 | 给 VGG 让权 | `lambda_mssc 50→30` | ⏳ 同上 |
+| 加 L1 loss | 降 MSE | 新增 `lambda_l1 10` | 待尝试 |
+| 换 LPIPS 网络 | 直接优化 LPIPS | AlexNet 替代 VGG | 待尝试 |
+
+#### 推理层面
+
+| 方案 | 效果 | 代价 |
+|------|------|------|
+| Ensemble 多模型平均 | MSE -20-30% (已验证) | 推理 Nx |
+| Test-time augmentation | MSE -5-10% | 推理 4-8x |
+| SDEdit post-refinement | LPIPS -15% | +5s/case |
+
+#### 优先级
+1. 等 v26_v3 (ngf=96) 结果 — 已验证最有效降 MSE 的方法
+2. v22_vgg20 (lambda_vgg=20) — 零架构代价，可能直接降 LPIPS
+3. 在最佳 base 上加 SDEdit refiner — v17 证明过有效
+4. 最终提交用 2-3 模型 ensemble — 降 MSE 最确定的方法
+
 ---
 
 ## 28. v30: v22 Retrain on data_multislice_v2 + LA-Breast + noise_aug
