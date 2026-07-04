@@ -1566,6 +1566,30 @@ output = pre + gate(x,y) × enhancement(x,y)
 | **Test samples** | 262 | 299 |
 | **LAB tumor mask** | 空 (np.zeros) | **椭圆近似** (from ROI coords) |
 
+### v22 全版本统一结果汇总
+
+| Metric | v22 (orig) on data_split/test | v22 (orig) on msv2 test | v22_msv2 (v2 train) on v3 test | v22_msv3 (v3 train) on v3 test |
+|--------|:---:|:---:|:---:|:---:|
+| MSE ↓ | **0.196** | 0.598 | 1.097 | 1.233 |
+| LPIPS ↓ | **0.101** | 0.131 | 0.168 | 0.163 |
+| SSIM_tumor ↑ | **0.698** | 0.531 | 0.369 | 0.385 |
+| FRD ↓ | **12.70** | — | 30.02 | 29.87 |
+| AUROC ↑ | — | 0.826 | — | **0.907** |
+| Dice ↑ | **0.720** | 0.525 | 0.474 | 0.500 |
+| HD95 ↓ | **57.4** | 111.9 | 127.4 | 135.6 |
+
+**说明**:
+- `v22 (orig)` = 在 data_split_v4 (2528 axial cases, single peak slice) 上训练的原始 v22 权重
+- `v22_msv2` = 在 data_multislice_v2 (~8.9k samples, per-phase GT) 上训练
+- `v22_msv3` = 在 data_multislice_v3 (~7k samples, peak±2, global peak GT, +LAB) 上训练
+- 各 test set 不同，不能跨列对比
+
+**关键发现**:
+1. v22 (orig) 在 data_split/test 上表现最好 (MSE 0.196, Dice 0.72) — 训练/测试数据匹配
+2. 同一模型在不同 test set 上差距巨大 — 说明 test set 难度不同
+3. v3 数据训练 vs v2 数据训练在同一 v3 test 上: v3 在 tumor 指标上更好 (Dice +5%, SSIM +4%)
+4. FRD 从 12.7 (orig test) 涨到 30 (v3 test) — v3 test set 的 radiomics 分布更难匹配
+
 ### v22 训练结果对比 (在 v3 test 上评估)
 
 | Metric | v22_msv2 (v2 数据训练) | v22_msv3 (v3 数据训练) | 变化 |
