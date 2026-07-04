@@ -73,6 +73,15 @@ class RadiomicsClassifier:
         if model_path is not None:
             with open(Path(model_path), "rb") as f:
                 self.model = pickle.load(f)  # noqa: S301
+            # Fix xgboost compatibility: old models have use_label_encoder
+            # attribute that was removed in xgboost >= 1.6
+            try:
+                from xgboost import XGBClassifier
+                if isinstance(self.model, XGBClassifier):
+                    if hasattr(self.model, 'use_label_encoder'):
+                        delattr(self.model, 'use_label_encoder')
+            except (ImportError, AttributeError):
+                pass
         elif model is not None:
             self.model = model
         else:
@@ -86,7 +95,6 @@ class RadiomicsClassifier:
             return XGBClassifier(
                 n_estimators=100,
                 max_depth=5,
-                use_label_encoder=False,
                 eval_metric="logloss",
                 random_state=42,
             )

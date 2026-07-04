@@ -111,7 +111,10 @@ def main():
         result_norm = result_norm[0, 0].cpu().numpy()
 
         # === De-normalize: convert back to global z-score space ===
+        # Only de-norm the breast region; background keeps original input values
         result = result_norm * img_std + img_mean
+        # Composite: breast region = de-normed model output, background = original input
+        result = breast_mask * result + (1 - breast_mask) * sl
 
         # Ensure correct shape
         if arr.ndim == 3:
