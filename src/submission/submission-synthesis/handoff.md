@@ -1550,6 +1550,55 @@ output = pre + gate(x,y) × enhancement(x,y)
 
 ---
 
+## 28. data_multislice_v2 vs v3 对比
+
+### 数据集区别
+
+| | data_multislice_v2 | data_multislice_v3 |
+|---|---|---|
+| **Slice 选取** | 每个 phase 各选自己的 peak slice | Global peak slice ± 2 邻居 |
+| **GT** | 每个 phase 自己的图像 (d1-d5) | **统一 global peak phase** |
+| **每 patient 样本数** | ~4 (4 phases) | ~3-5 (center + neighbors) |
+| **GT 一致性** | ❌ 不同 phase 增强不同 | ✅ 全部 peak enhancement |
+| **Train (MAMA-MIA)** | 5227 | 5863 |
+| **Train (LAB)** | 3670 (per-phase) | 1179 (all slices, peak GT) |
+| **Train total** | ~8897 | ~7042 |
+| **Test samples** | 262 | 299 |
+| **LAB tumor mask** | 空 (np.zeros) | **椭圆近似** (from ROI coords) |
+
+### v22 训练结果对比 (在 v3 test 上评估)
+
+| Metric | v22_msv2 (v2 数据训练) | v22_msv3 (v3 数据训练) | 变化 |
+|--------|:---:|:---:|------|
+| MSE ↓ | **1.097** | 1.233 | ❌ +12% |
+| LPIPS ↓ | 0.168 | **0.163** | ✅ -3% |
+| SSIM_tumor ↑ | 0.369 | **0.385** | ✅ +4% |
+| AUROC ↑ | — | **0.907** | — |
+| Dice ↑ | 0.474 | **0.500** | ✅ +5% |
+| HD95 ↓ | **127.4** | 135.6 | ❌ +6% |
+
+**结论**: v3 数据的 GT 一致性对 tumor 指标有帮助 (Dice +5%, SSIM +4%)，但 LAB 低 intensity range 可能拖累 MSE。
+
+### vs GC Validation Phase 第一名 (MamoAnd)
+
+| Metric | #1 MamoAnd (GC Val) | v22_msv3 (v3 test) | 差距 |
+|--------|:---:|:---:|------|
+| MSE ↓ | **0.57** | 1.23 | 2.2x ❌ |
+| LPIPS ↓ | **0.08** | 0.16 | 2x ❌ |
+| SSIM_tumor ↑ | **0.43** | 0.39 | -9% |
+| AUROC ↑ | 0.80 | **0.91** | ✅ +14% |
+| Dice ↑ | 0.48 | **0.50** | ✅ +4% |
+| HD95 ↓ | **120.6** | 135.6 | ❌ +12% |
+
+⚠️ 注意: test set 不同，不能直接对比。GC val = Radboud 416×416 + Fleming 512×512。
+
+**差距分析**:
+- MSE 和 LPIPS 差距最大 (2x) — 像素精度和感知质量是主要短板
+- AUROC 和 Dice 我们有优势 — contrast signal 和 tumor detection OK
+- **优先改善方向**: 降 MSE 和 LPIPS → v26_v3 (ngf=96) 或 SDEdit refiner
+
+---
+
 ## 28. v30: v22 Retrain on data_multislice_v2 + LA-Breast + noise_aug
 
 **动机**: v22 是最强单模型，在新数据集上重训并加入：
