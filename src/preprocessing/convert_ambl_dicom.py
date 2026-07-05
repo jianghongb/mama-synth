@@ -260,30 +260,41 @@ def main():
                       if 'mask_dir' in data and 'multi_dir' in data}
     logger.info(f"Valid patients (have MASK + MultiPhase): {len(valid_patients)}")
 
-    # Process patients
+    # Process patients (parallel)
     total_slices = 0
     errors = 0
-    for i, (pid, data) in enumerate(sorted(valid_patients.items()), 1):
-        pid_clean = pid.replace('-', '_')
-        result_pid, n = process_patient(
-            patient_id=pid_clean,
-            mask_dir=data['mask_dir'],
-            multi_dir=data['multi_dir'],
-            roi_dir=data.get('roi_dir'),
-            mha_input_dir=mha_input_dir,
-            mha_gt_dir=mha_gt_dir,
-            mha_mask_dir=mha_mask_dir,
-            norm_mean=norm_mean,
-            norm_std=norm_std,
-            extra_slices=args.extra_slices,
-        )
-        if n < 0:
-            errors += 1
-        else:
-            total_slices += n
 
-        if i % 50 == 0:
-            logger.info(f"  Progress: {i}/{len(valid_patients)} patients, {total_slices} slices, {errors} errors")
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
+    futures = {}
+    with ProcessPoolExecutor(max_workers=args.workers) as executor:
+        for pid, data in sorted(valid_patients.items()):
+            pid_clean = pid.replace('-', '_')
+            future = executor.submit(
+                process_patient,
+                patient_id=pid_clean,
+                mask_dir=data['mask_dir'],
+                multi_dir=data['multi_dir'],
+                roi_dir=data.get('roi_dir'),
+                mha_input_dir=mha_input_dir,
+                mha_gt_dir=mha_gt_dir,
+                mha_mask_dir=mha_mask_dir,
+                norm_mean=norm_mean,
+                norm_std=norm_std,
+                extra_slices=args.extra_slices,
+            )
+            futures[future] = pid
+
+        done = 0
+        for future in as_completed(futures):
+            done += 1
+            result_pid, n = future.result()
+            if n < 0:
+                errors += 1
+            else:
+                total_slices += n
+            if done % 50 == 0:
+                logger.info(f"  Progress: {done}/{len(valid_patients)} patients, {total_slices} slices, {errors} errors")
 
     logger.info(f"\nDone. {total_slices} slices from {len(valid_patients)} patients ({errors} errors) → {output_dir}")
 
