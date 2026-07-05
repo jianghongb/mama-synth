@@ -1568,6 +1568,35 @@ output = pre + gate(x,y) × enhancement(x,y)
 
 ### v22 全版本统一结果汇总
 
+#### 所有版本在 data_multislice_v3 test (299 cases) 上的对比
+
+| Metric | v22 (v2 train) | v22 (v3 train) | v26 (v3 train) | **v31_pinorm** | #1 GC Val |
+|--------|:---:|:---:|:---:|:---:|:---:|
+| MSE ↓ | **1.097** | 1.233 | 1.101 | 1.236 | 0.57 |
+| LPIPS ↓ | 0.168 | 0.163 | 0.157 | **0.117** 🏆 | 0.08 |
+| SSIM_tumor ↑ | 0.369 | 0.385 | 0.394 | **0.476** 🏆 | 0.43 |
+| FRD ↓ | 30.02 | 29.87 | 29.66 | **28.45** 🏆 | 25.06 |
+| AUROC ↑ | — | **0.907** | — | 0.831 | 0.80 |
+| Dice ↑ | 0.474 | 0.500 | 0.493 | **0.539** 🏆 | 0.48 |
+| HD95 ↓ | 127.4 | 135.6 | 144.9 | **125.6** 🏆 | 120.6 |
+
+**版本说明**:
+| 版本 | 训练数据 | 架构 | 特殊改动 |
+|------|---------|------|---------|
+| v22 (v2 train) | data_multislice_v2 (~8.9k, per-phase GT) | ngf=64, blocks=12 | noise_aug |
+| v22 (v3 train) | data_multislice_v3 (~7k, peak GT + LAB) | ngf=64, blocks=12 | noise_aug |
+| v26 (v3 train) | data_multislice_v3 (~7k) | **ngf=96**, blocks=12 | noise_aug |
+| **v31_pinorm** | data_multislice_v3 (~7k) | ngf=64, blocks=12 | **per-image z-score norm** |
+
+**关键发现**:
+1. **v31_pinorm 在 5/7 指标上最优** — per-image norm 是最有效的单一改进
+2. **v26 (ngf=96) MSE 最低** (1.101) — 更大网络对像素精度有帮助
+3. **v22 (v2 train) MSE 接近 v26** (1.097) — 可能因为训练量更大 (8.9k vs 7k)
+4. **v31 SSIM/Dice 超过 GC #1** — 说明 per-image norm 对 tumor 区域特别有效
+5. **MSE 仍是主要差距** — 所有版本 ~1.1-1.2 vs GC #1 的 0.57
+
+#### v22 跨 test set 结果 (同一模型不同 test)
+
 | Metric | v22 (orig) on data_split/test | v22 (orig) on msv2 test | v22_msv2 (v2 train) on v3 test | v22_msv3 (v3 train) on v3 test |
 |--------|:---:|:---:|:---:|:---:|
 | MSE ↓ | **0.196** | 0.598 | 1.097 | 1.233 |
