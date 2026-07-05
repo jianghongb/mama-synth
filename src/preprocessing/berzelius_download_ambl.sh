@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -A berzelius-2026-192
 #SBATCH -p berzelius
-#SBATCH --gpus=0
+#SBATCH --gpus=1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=32G
 #SBATCH -t 24:00:00
