@@ -2,7 +2,7 @@
 #SBATCH -A berzelius-2026-192
 #SBATCH -p berzelius
 #SBATCH --gpus=0
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=16
 #SBATCH --mem=32G
 #SBATCH -t 24:00:00
 #SBATCH -J download_ambl
@@ -49,7 +49,7 @@ print(relevant['SeriesDescription'].value_counts())
 # Download all relevant series
 uids = relevant['SeriesInstanceUID'].tolist()
 print(f'Starting download of {len(uids)} series...')
-nbia.downloadSeries(uids, input_type='list', path=output_dir, max_workers=8)
+nbia.downloadSeries(uids, input_type='list', path=output_dir, max_workers=16)
 print('Download complete!')
 "
 
