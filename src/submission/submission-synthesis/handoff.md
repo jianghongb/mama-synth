@@ -1513,29 +1513,6 @@ output = pre + gate(x,y) × enhancement(x,y)
 
 ---
 
-## 26. data_multislice_v2 评估对比 (2026-07-02)
-
-### 数据集说明
-
-> 详见 "28. data_multislice_v2 vs v3 对比" 和文档末尾 "📊 全版本评估结果汇总"。
-
-### 关键结论 (2026-07-02)
-
-1. **训练数据量 > 架构创新**: v26 (23k slices) 全面碾压 v26b/v28b/v29b (5.2k slices)
-2. **UC-GAN (v28) 废弃**: 两个数据集上都失败
-3. **Swin (v29) 不采用**: 略好于 v28b 但远不如 v22 baseline
-4. **v26b 训练时无 breast mask**: 不公平对比，已修复脚本
-5. **邻居 slice 作为 data augmentation 极其有效** → 促成 data_multislice_v3 (peak ± 2) 的设计
-
-### 下一步
-
-1. **v22 retrain (v30)** — v22 配置 + data_multislice_v2 + LAB data + noise_aug + breast_mask, batch=16, lr=0.0003
-2. **v31 (Swin + UC-GAN)** — v28+v29 合并，在新数据上训练，备用方案
-3. 考虑在**旧 data_multislice**（23k slices）上重训 → 确认是数据量问题还是数据质量问题
-4. data_multislice_v2 恢复邻居 slice → 增大训练量
-
----
-
 ## 28. data_multislice_v2 vs v3 对比
 
 ### 数据集区别
