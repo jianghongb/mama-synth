@@ -4,13 +4,13 @@
 #SBATCH --gpus=1
 #SBATCH --cpus-per-task=16
 #SBATCH -t 48:00:00
-#SBATCH -J v32_huber
+#SBATCH -J v31b_huber
 #SBATCH -o /proj/berzbiomedicalimagingkth/users/x_honji/train_%j.log
 #SBATCH -e /proj/berzbiomedicalimagingkth/users/x_honji/train_%j.err
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=hongjia@kth.se
 #
-# v32: v31_pinorm + Huber loss + GT clipping.
+# v31b: v31_pinorm + Huber loss + GT clipping.
 # Target: reduce MSE by handling outlier cases better.
 # - GT clipped to P95 in perimage_norm dataset (avoids chasing extreme pixels)
 # - Huber (SmoothL1) loss replaces L1 (less sensitive to large errors)
@@ -34,12 +34,12 @@ git pull origin dev
 
 cd $PROJ/mama-synth/src/submission/submission-synthesis/models
 
-echo "=== Starting v32 (pinorm + huber + GT clip) ==="
+echo "=== Starting v31b (pinorm + huber + GT clip) ==="
 echo "Dataset: $PROJ/data_multislice_v3/train"
 echo "Samples: $(ls $PROJ/data_multislice_v3/train/mha/input/*.mha 2>/dev/null | wc -l)"
 
 python train.py \
-  --name mamasynth_v32 \
+  --name mamasynth_v31b \
   --model pix2pixHD \
   --dataset_mode mha_perimage_norm \
   --dataroot $PROJ/data_multislice_v3/train \
@@ -78,5 +78,5 @@ python train.py \
   --print_freq 100 \
   --gpu_ids 0
 
-echo "Done! Weights: $PROJ/checkpoints/mamasynth_v32/latest_net_G.pth"
+echo "Done! Weights: $PROJ/checkpoints/mamasynth_v31b/latest_net_G.pth"
 echo "Inference: use infer_perimage_norm.py (same as v31)"
