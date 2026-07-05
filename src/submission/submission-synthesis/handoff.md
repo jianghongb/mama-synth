@@ -522,36 +522,6 @@ images/ + segmentations/
 
 ---
 
-## 10. 当前执行状态 (2026-06-17 11:09)
-
-### Berzelius 上正在跑的 Jobs
-- 19 个 GPU job 在排队 (mask_0_80 ~ mask_1440_1520)
-- 执行方案 A: `mask_and_preprocess.py` + Dataset932 (4ch 3D)
-- 输出到: `data_split_v5/train/`
-- 排除 160 个 motion cases
-- 每个 job 处理 80 patients, 预计 1h/job
-
-### 本地已完成
-- `data_split_v5/train/mha/` 在本地有 1506 cases (方案B Step1, 无mask的干净数据)
-- `data_split_v5/train/mha/breast_mask/` 有 1506 个 Dataset910 2D mask (本地生成)
-- `data_split_v5_lius/` 是从 Berzelius 同步回来的旧结果 (1049 cases, 无mask)
-
-### 等待中
-- GPU jobs 开始执行后，`data_split_v5` 会被重写为方案 A 的结果(masked)
-- 全部完成后 → 用 v12 脚本训练
-
-### 可以同时在 CPU 上做的
-- 在 Berzelius CPU node 上用 Dataset910 2D 给本地 preprocess 结果生成 breast mask (~60min)
-- 这样方案 B 的数据也准备好了，训练时用 --breast_mask_dir 即可
-
-### 下一步
-1. 等 GPU jobs 完成 → data_split_v5 方案A数据就绪
-2. 或在 CPU 上跑 Dataset910 breast mask → 方案B数据就绪
-3. 用完整数据训练 v12 (方案A) 或新版本 (方案B)
-4. 评估 → 选最佳 → 提交 GC
-
----
-
 ## 11. Axial-Only 训练发现 (v13/v14)
 
 ### GC 官方确认: "validation and test data contains only axial cases"
