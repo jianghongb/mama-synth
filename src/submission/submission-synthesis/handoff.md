@@ -601,10 +601,24 @@ Model 2 predict → mask2 (各自带后处理)
 | 数据 | data_split_v4 axial-only (2528 cases) |
 | Breast mask | Ensemble (ResEncUNetL f0 OR PlainConv f4) + postprocess |
 | Intensity aug | ✅ |
-| Epochs | 50 (quick test: niter=25 + niter_decay=25) |
+| Epochs | 200 (niter=100 + niter_decay=100) |
 | 其余超参 | 同 v14 (MSEC=50, tumor=10, etc.) |
 
-### 状态: ⏳ 待训练
+**结果 (data_split/test, 199 cases)**:
+
+| Metric | v14 | **v16 full** | v17 |
+|--------|:---:|:---:|:---:|
+| MSE ↓ | **0.212** | 0.218 | 0.216 |
+| LPIPS ↓ | 0.126 | 0.124 | **0.109** |
+| SSIM_tumor ↑ | **0.689** | 0.680 | 0.688 |
+| FRD ↓ | 11.90 | 11.51 | **10.54** |
+| AUROC ↑ | 0.831 | **0.844** | 0.829 |
+| Dice ↑ | 0.703 | 0.722 | **0.731** |
+| HD95 ↓ | 68.9 | 63.7 | **62.8** |
+
+**结论**: v16 ensemble mask 提升了 AUROC (+1.3%) 和 Dice (+2.7%)，证明更完整的 breast mask 有帮助。但整体不如 v17 (SDEdit refiner)。
+
+**状态**: ✅ 完成
 
 ---
 
