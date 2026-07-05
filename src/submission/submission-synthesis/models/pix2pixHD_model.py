@@ -86,7 +86,8 @@ class Pix2PixHDModel(BaseModel):
             self.loss_filter = self.init_loss_filter(not opt.no_ganFeat_loss, not opt.no_vgg_loss, self.use_tumor_loss, self.use_ssim_loss, self.use_mssc_loss, self.use_edge_loss, self.use_unc_loss)
             
             self.criterionGAN = networks.GANLoss(use_lsgan=not opt.no_lsgan, tensor=self.Tensor)   
-            self.criterionFeat = torch.nn.L1Loss()
+            self.criterionFeat = torch.nn.SmoothL1Loss() if getattr(opt, 'huber_loss', False) else torch.nn.L1Loss()
+            self.criterionRecon = torch.nn.SmoothL1Loss() if getattr(opt, 'huber_loss', False) else torch.nn.L1Loss()
             if not opt.no_vgg_loss:             
                 self.criterionVGG = networks.VGGLoss(self.gpu_ids)
             if self.use_mssc_loss:
@@ -254,15 +255,18 @@ class Pix2PixHDModel(BaseModel):
                 ssim_val = ssim_fn(fake_image, real_image, data_range=data_range.item())
                 loss_G_SSIM = (1 - ssim_val) * self.lambda_ssim
 
-        # Tumor-weighted L1 loss (replaced by spatial_weight when enabled)
+        # Tumor-weighted reconstruction loss (Huber when --huber_loss enabled)
         loss_G_Tumor = 0
         if spatial_w is not None:
-            # Spatially-weighted L1: background=1, breast=20, tumor=1000 (normalized)
-            loss_G_Tumor = (spatial_w * (fake_image - real_image).abs()).mean() * self.tumor_weight
+            # Spatially-weighted L1/Huber: background=1, breast=20, tumor=1000 (normalized)
+            if getattr(self.opt, 'huber_loss', False):
+                loss_G_Tumor = (spatial_w * torch.nn.functional.smooth_l1_loss(fake_image, real_image, reduction='none')).mean() * self.tumor_weight
+            else:
+                loss_G_Tumor = (spatial_w * (fake_image - real_image).abs()).mean() * self.tumor_weight
         elif self.use_tumor_loss and mask is not None:
             mask_gpu = mask.data.cpu() if not torch.cuda.is_available() else mask.data.cuda()
             if mask_gpu.sum() > 0:
-                loss_G_Tumor = torch.nn.functional.l1_loss(
+                loss_G_Tumor = self.criterionRecon(
                     fake_image * mask_gpu, real_image * mask_gpu
                 ) * self.tumor_weight
 

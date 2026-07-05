@@ -79,6 +79,10 @@ class MhaPerImageNormDataset(BaseDataset):
         input_norm = (input_arr - img_mean) / img_std
         gt_norm = (gt_arr - img_mean) / img_std
 
+        # Clip GT to prevent extreme values (avoid model chasing outliers)
+        gt_p95 = float(np.percentile(gt_norm[breast_mask_arr > 0.5], 95)) if (breast_mask_arr > 0.5).sum() > 100 else 3.0
+        gt_norm = np.clip(gt_norm, -1.0, max(gt_p95, 3.0))
+
         # Zero out background
         input_norm = input_norm * breast_mask_arr
         gt_norm = gt_norm * breast_mask_arr
