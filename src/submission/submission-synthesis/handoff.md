@@ -2,27 +2,47 @@
 
 ---
 
-## Executive Summary (2026-06-25)
+## Executive Summary (2026-07-05)
 
-### Best Models
+### Best Models (data_multislice_v3 test, 299 cases)
 
-| Rank | Version | MSE ↓ | LPIPS ↓ | SSIM_tumor ↑ | Architecture | Key Change |
-|:---:|---------|:-----:|:-------:|:------------:|--------------|------------|
-| 🥇 | **v22** | **0.196** | **0.101** | 0.698 | GlobalGen, ngf=64, n_blocks=12 | Deeper network |
-| 🥈 | **v17** | 0.216 | 0.109 | 0.688 | GlobalGen + SDEdit refiner | Diffusion refinement |
-| 🥉 | **v11** | 0.223 | 0.127 | 0.669 | GlobalGen, ngf=64 | data_split_v4 baseline |
-| 4 | v21 | 0.974 | 0.145 | **0.784** 🏆 | Bilateral split | Best SSIM but high MSE |
-| 5 | v20 | 0.574 | 0.137 | 0.623 | GlobalGen + Dataset920 mask | 2D breast mask |
-| 6 | v23 | 0.922 | 0.140 | 0.367 | LocalEnhancer, ngf=32 | ❌ 容量不足 |
+| Rank | Version | MSE ↓ | LPIPS ↓ | SSIM_tumor ↑ | Dice ↑ | HD95 ↓ | Key Change |
+|:---:|---------|:-----:|:-------:|:------------:|:------:|:------:|------------|
+| 🥇 | **v31_pinorm** | 1.236 | **0.117** | **0.476** | **0.539** | **125.6** | Per-image z-score normalization |
+| 🥈 | **v26_msv3** | **1.101** | 0.157 | 0.394 | 0.493 | 144.9 | Wider network (ngf=96) |
+| 🥉 | **v22_msv3** | 1.233 | 0.163 | 0.385 | 0.500 | 135.6 | Baseline deeper (n_blocks=12) |
+| 4 | v22_msv2 | 1.097 | 0.168 | 0.369 | 0.474 | 127.4 | Trained on v2 data (per-phase GT) |
+
+### Historical Best (data_split/test, 199 cases — original test set)
+
+| Rank | Version | MSE ↓ | LPIPS ↓ | SSIM_tumor ↑ | Dice ↑ | HD95 ↓ |
+|:---:|---------|:-----:|:-------:|:------------:|:------:|:------:|
+| 🥇 | **v26** | **0.181** | **0.100** | **0.713** | **0.730** | 63.3 |
+| 🥈 | **v22** | 0.196 | 0.101 | 0.698 | 0.720 | **57.4** |
+| 🥉 | **v17** | 0.216 | 0.109 | 0.688 | 0.731 | 62.8 |
 
 ### Current Recommendation
-- **提交用**: v22 (best MSE + LPIPS) 或 v17 (balanced)
-- **SSIM_tumor 最优**: v21 (bilateral split)
-- **不采用**: v23 (LocalEnhancer ngf=32 失败)
+- **提交首选**: v31_pinorm (SSIM/Dice/LPIPS 最优，超过 GC #1 多项指标)
+- **MSE 最优**: v26_msv3 (ngf=96, MSE=1.101)
+- **下一步最有前途**: v26 + pinorm (结合两者优势)
+- **不采用**: v28b (UC-GAN), v29b (Swin) — 全面退步
+
+### vs GC Validation #1 (MamoAnd)
+
+| Metric | #1 MamoAnd | **v31_pinorm** | 状态 |
+|--------|:---:|:---:|:---:|
+| MSE ↓ | **0.57** | 1.24 | ❌ 2x gap |
+| LPIPS ↓ | **0.08** | 0.12 | ❌ 1.5x gap |
+| SSIM_tumor ↑ | 0.43 | **0.48** | ✅ 超过 |
+| Dice ↑ | 0.48 | **0.54** | ✅ 超过 |
+| HD95 ↓ | **120.6** | 125.6 | ≈ 持平 |
+
+⚠️ Test set 不同，仅作方向参考。MSE/LPIPS 仍是主要差距。
 
 ### Active Experiments
-- v25: Uncertainty-Aware Loss (SAFE-Diff 启发) — ⏳ 待训练
-- K-Fold v20b — ⏳ 进行中
+- v22_vgg20: lambda_vgg=20 降 LPIPS — ⏳ 训练中
+- v26 + pinorm: 大网络 + per-image norm — 待启动
+- SDEdit refiner on v31_pinorm — 待启动
 
 ### Quick Reference
 - 架构: Section 1
@@ -30,6 +50,7 @@
 - Breast Masking: Section 3
 - Docker 提交: Section 6
 - GC 评估指标: Section 7
+- **全版本结果汇总: 文档末尾 📊**
 
 ---
 
