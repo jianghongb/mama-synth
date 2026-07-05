@@ -1,9 +1,16 @@
 #!/bin/bash
+#SBATCH -A berzelius-2026-192
+#SBATCH -p berzelius
+#SBATCH --gpus=1
+#SBATCH --cpus-per-task=4
+#SBATCH -t 1:00:00
+#SBATCH -J ambl_mask
+#SBATCH -o /proj/berzbiomedicalimagingkth/users/x_honji/ambl_mask_%j.log
+#SBATCH -e /proj/berzbiomedicalimagingkth/users/x_honji/ambl_mask_%j.err
 #
 # Generate enhancement-based tumor masks for AMBL files in data_multislice_v3.
-# Run on login node (no GPU needed, ~1-2 min).
 #
-# Usage: bash src/preprocessing/gen_ambl_tumor_masks.sh
+# Usage: sbatch src/preprocessing/gen_ambl_tumor_masks.sh
 
 PROJ=/proj/berzbiomedicalimagingkth/users/x_honji
 
