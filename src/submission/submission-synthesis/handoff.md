@@ -1849,17 +1849,22 @@ input (global z-score) → breast mask → per-image mean/std
 2. v31_pinorm + SDEdit refiner — 叠加 diffusion 精修
 3. Ensemble: v31_pinorm + v22_msv3 + v26_v3 — 多模型平均
 
-**动机**: v22 是最强单模型，在新数据集上重训并加入：
-1. LA-Breast 外部数据（+3670 samples）
-2. noise_aug（input σ=0.02-0.05, GT σ=0.02-0.08）
-3. breast mask (Dataset930)
-4. 优化 GPU 利用率（batch=16, nThreads=16）
+**动机**: v22 是最强单模型，在新数据集上重训并加入 noise_aug、更多数据、优化 GPU 利用率。
 
-**配置**:
+**两次训练**:
 
-| 参数 | v22 (原) | v30 (新) |
+| | v22_msv2 (第一次) | v22_msv3 (第二次) |
+|---|---|---|
+| 数据 | data_multislice_v2/train (~8.9k) | data_multislice_v3/train (~7.0k) |
+| GT 策略 | per-phase peak (GT 不一致) | **global peak phase (GT 一致)** |
+| LAB 数据 | 3670 (per-phase, 无 tumor mask) | 1179 (all slices, 椭圆 tumor mask) |
+| Job | 17019506 (killed at 480 iter) → 重跑完成 | 17020194 ✅ 完成 (18h 27min) |
+| Checkpoint | `mamasynth_v22` | `mamasynth_v22_v3` |
+
+**配置** (两次共同):
+
+| 参数 | v22 (原) | v22_msv2 / v22_msv3 |
 |------|---------|---------|
-| 数据 | data_split_v4 (2528 axial) | data_multislice_v2/train (~8.9k, 含 LAB) |
 | Breast mask | Dataset920 | Dataset930 |
 | noise_aug | ❌ | ✅ (input σ=0.02-0.05, GT σ=0.02-0.08) |
 | intensity_aug | ✅ | ✅ |
@@ -1871,17 +1876,11 @@ input (global z-score) → breast mask → per-image mean/std
 | residual_mode | ✅ | ✅ |
 | epochs | 200 | 200 |
 
-**训练数据构成**:
-| 来源 | Samples | 说明 |
-|------|---------|------|
-| MAMA-MIA (DUKE/ISPY2/YUNNAN/NACT) | 5227 | per-phase peak slice, motion excluded |
-| LA-Breast (d1-d5) | 3670 | 5 post-contrast phases, 734 slices |
-| **合计** | **~8897** | |
+**脚本**:
+- v22_msv2: `berzelius_train_v22_deeper.sh`
+- v22_msv3: `berzelius_train_v22_deeper_v3.sh`
 
-**脚本**: `berzelius_train_v22_deeper.sh` (名字沿用，内容已更新为 v30 配置)
-**Checkpoint**: `$PROJ/checkpoints/mamasynth_v22/latest_net_G.pth`
-
-**状态**: ⏳ 训练中（Berzelius job 17019506）
+**状态**: ✅ 两次均已完成，结果见 "所有版本在 v3 test 上的对比" 表
 
 ---
 
