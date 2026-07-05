@@ -1787,6 +1787,58 @@ output = pre + gate(x,y) × enhancement(x,y)
 
 ---
 
+## 28c. v22_vgg20: 加大 VGG Loss 实验 (2026-07-05)
+
+**动机**: 尝试通过加大 VGG perceptual loss 权重直接降低 LPIPS，同时减小 MSSC 权重为 VGG 让权。
+
+**配置** (对比 v22_msv3 基线):
+
+| 参数 | v22_msv3 (基线) | v22_vgg20 (本次) |
+|------|----------------|-----------------|
+| lambda_vgg | 10 | **20** |
+| lambda_mssc | 50 | **30** |
+| ngf | 64 | 64 |
+| n_blocks | 12 | 12 |
+| 数据 | data_multislice_v3 | data_multislice_v3 |
+| breast_mask | ✅ | ✅ |
+| 其余参数 | — | 同 v22_msv3 |
+
+**训练**: Berzelius job 17022978 (`v22_vgg20`), 运行时间 18h 40min, COMPLETED
+**脚本**: `berzelius_train_v22_vgg20.sh` (`--name mamasynth_v22_vgg20`)
+**权重**: `latest_net_G-v22_vgg20.pth` (912 MB, 239M params, ngf=64, n_blocks=12)
+
+### 结果 (data_multislice_v3/test, 299 cases)
+
+| Metric | v22_msv2→v3test (vgg=10,mssc=50) | v22_vgg20 (vgg=20,mssc=30) | v26_msv3 (ngf=96) | 变化 vs 基线 |
+|--------|:---:|:---:|:---:|------|
+| MSE ↓ | **1.097** | 1.573 | 1.101 | ❌ +43% |
+| LPIPS ↓ | **0.168** | 0.201 | **0.157** | ❌ +20% |
+| SSIM_tumor ↑ | 0.369 | 0.319 | **0.394** | ❌ -14% |
+| FRD ↓ | **30.02** | 30.32 | **29.66** | ≈持平 |
+| Dice ↑ | 0.474 | **0.496** | 0.493 | ✅ +5% |
+| HD95 ↓ | **127.4** | 136.1 | 144.9 | ❌ +7% |
+
+### 分析
+
+1. **LPIPS 反而恶化** (0.168→0.201, +20%): VGG loss 权重过大导致生成器在 VGG 特征空间过拟合，牺牲了像素精度和感知多样性。VGG loss 和 LPIPS 虽然都基于 VGG 特征，但优化 VGG L1 ≠ 优化 LPIPS (后者是 learned distance)。
+
+2. **MSE 大幅退步** (+43%): 减小 MSSC (50→30) 削弱了多尺度减影一致性约束，导致全图像素精度下降。
+
+3. **Dice 微弱改善** (+5%): 可能是 VGG 特征对齐帮助了 tumor 增强信号的空间准确性，但改善幅度不显著。
+
+4. **SSIM_tumor 下降** (-14%): 肿瘤区域结构一致性恶化，说明 MSSC 对 tumor ROI 的贡献比 VGG 更大。
+
+### 结论
+
+- ❌ **加大 VGG loss 不能降低 LPIPS** — 直觉错误，VGG L1 loss 和 LPIPS metric 不等价
+- ❌ **减小 MSSC 有害** — MSSC 对全图和 tumor 区域一致性贡献大
+- ✅ **维持 lambda_vgg=10, lambda_mssc=50** 仍是最优 loss 配置
+- 如需降 LPIPS，应从架构/数据方向入手（如 SDEdit refiner, ensemble），而非调 loss 权重
+
+**状态**: ✅ 完成 — 不采用
+
+---
+
 ## 30. v31: Per-Image Z-Score Normalization (pinorm)
 
 **动机**: 消除 cross-scanner intensity variation。每张图用自己 breast-region 的 mean/std 归一化，模型在 canonical space (mean≈0, std≈1) 中学习。推理时 normalize → model → de-normalize 回 global z-score space。

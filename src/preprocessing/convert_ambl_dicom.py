@@ -141,18 +141,35 @@ def process_patient(
         else:
             peak_idx = find_peak_slice(peak_vol)
 
-        # Load ROI mask if available
+        # Load ROI mask if available (DICOM SEG format)
         has_roi = False
         roi_vol = None
         if roi_dir and roi_dir.exists():
-            # ROI is DICOM SEG - try to load
             seg_files = list(roi_dir.glob("*.dcm"))
             if seg_files:
                 try:
+                    import highdicom as hd
                     ds = pydicom.dcmread(str(seg_files[0]))
-                    if hasattr(ds, 'pixel_array'):
-                        roi_vol = ds.pixel_array.astype(np.float32)
-                        has_roi = True
+                    seg = hd.seg.Segmentation.from_dataset(ds)
+                    # Extract binary mask from all segments
+                    roi_arr = seg.pixel_array  # (frames, H, W)
+                    if roi_arr.ndim == 3:
+                        # Collapse all segments into single binary mask
+                        roi_vol = (roi_arr.max(axis=0) if roi_arr.shape[0] > n_slices 
+                                   else roi_arr).astype(np.float32)
+                        # Ensure correct number of slices
+                        if roi_vol.shape[0] == n_slices:
+                            has_roi = True
+                except ImportError:
+                    # Fallback: try raw pixel_array
+                    try:
+                        ds = pydicom.dcmread(str(seg_files[0]))
+                        if hasattr(ds, 'pixel_array'):
+                            roi_vol = ds.pixel_array.astype(np.float32)
+                            if roi_vol.ndim >= 2:
+                                has_roi = True
+                    except:
+                        pass
                 except:
                     pass
 
@@ -169,14 +186,18 @@ def process_patient(
             pre_2d = pre_vol[slice_idx]
             gt_2d = peak_vol[slice_idx]
 
-            # Mask: use ROI if available, else zeros
-            if has_roi and roi_vol is not None and roi_vol.ndim >= 2:
-                if roi_vol.ndim == 3 and slice_idx < roi_vol.shape[0]:
-                    mask_2d = (roi_vol[slice_idx] > 0).astype(np.int16)
+            # Mask priority: 1) ROI segmentation, 2) enhancement-based
+            if has_roi and roi_vol is not None and roi_vol.ndim == 3 and slice_idx < roi_vol.shape[0]:
+                mask_2d = (roi_vol[slice_idx] > 0).astype(np.int16)
+            else:
+                # Enhancement-based tumor mask: top 10% enhancing pixels
+                enhancement = gt_2d - pre_2d
+                pos_enhance = enhancement[enhancement > 0]
+                if pos_enhance.size > 100:
+                    threshold = float(np.percentile(pos_enhance, 90))
+                    mask_2d = (enhancement > threshold).astype(np.int16)
                 else:
                     mask_2d = np.zeros_like(pre_2d, dtype=np.int16)
-            else:
-                mask_2d = np.zeros_like(pre_2d, dtype=np.int16)
 
             # Z-score normalize
             pre_norm = zscore(pre_2d, norm_mean, norm_std)

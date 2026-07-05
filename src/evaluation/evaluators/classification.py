@@ -105,26 +105,30 @@ class RadiomicsClassifier:
 
     @staticmethod
     def _fix_xgboost_compat(model: Any) -> None:
-        """Remove deprecated use_label_encoder from XGBClassifier (xgboost >= 1.6)."""
+        """Fix deprecated use_label_encoder for XGBClassifier (xgboost >= 1.6).
+        
+        Old models may trigger 'use_label_encoder' access during predict.
+        We ensure the attribute exists and is set to False.
+        """
         try:
             from xgboost import XGBClassifier
         except ImportError:
             return
+
+        def _patch(obj):
+            if isinstance(obj, XGBClassifier):
+                obj.use_label_encoder = False
+
         # Direct XGBClassifier
-        if isinstance(model, XGBClassifier):
-            if hasattr(model, 'use_label_encoder'):
-                delattr(model, 'use_label_encoder')
-            return
+        _patch(model)
         # sklearn Pipeline: check each step
         if hasattr(model, 'steps'):
             for _, step in model.steps:
-                if isinstance(step, XGBClassifier) and hasattr(step, 'use_label_encoder'):
-                    delattr(step, 'use_label_encoder')
+                _patch(step)
         # VotingClassifier or similar: check estimators
         if hasattr(model, 'estimators_'):
             for est in model.estimators_:
-                if isinstance(est, XGBClassifier) and hasattr(est, 'use_label_encoder'):
-                    delattr(est, 'use_label_encoder')
+                _patch(est)
 
     def predict_proba(self, features: np.ndarray) -> np.ndarray:
         features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
