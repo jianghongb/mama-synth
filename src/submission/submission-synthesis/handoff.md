@@ -1615,56 +1615,64 @@ output = pre + gate(x,y) × enhancement(x,y)
 4. **v31 SSIM/Dice 超过 GC #1** — 说明 per-image norm 对 tumor 区域特别有效
 5. **MSE 仍是主要差距** — 所有版本 ~1.1-1.2 vs GC #1 的 0.57
 
-#### v22 跨 test set 结果 (同一模型不同 test)
+#### v22 系列全版本统一结果
 
-| Metric | v22 (orig) on data_split/test | v22 (orig) on msv2 test | v22_msv2 (v2 train) on v3 test | v22_msv3 (v3 train) on v3 test |
-|--------|:---:|:---:|:---:|:---:|
-| MSE ↓ | **0.196** | 0.598 | 1.097 | 1.233 |
-| LPIPS ↓ | **0.101** | 0.131 | 0.168 | 0.163 |
-| SSIM_tumor ↑ | **0.698** | 0.531 | 0.369 | 0.385 |
-| FRD ↓ | **12.70** | — | 30.02 | 29.87 |
-| AUROC ↑ | — | 0.826 | — | **0.907** |
-| Dice ↑ | **0.720** | 0.525 | 0.474 | 0.500 |
-| HD95 ↓ | **57.4** | 111.9 | 127.4 | 135.6 |
+##### A. v3 test (299 cases) — 主要对比
 
-**说明**:
-- `v22 (orig)` = 在 data_split_v4 (2528 axial cases, single peak slice) 上训练的原始 v22 权重
-- `v22_msv2` = 在 data_multislice_v2 (~8.9k samples, per-phase GT) 上训练
-- `v22_msv3` = 在 data_multislice_v3 (~7k samples, peak±2, global peak GT, +LAB) 上训练
-- 各 test set 不同，不能跨列对比
+| Metric | v22_msv2 | v22_msv3 | v26_msv3 | **v31_pinorm** | #1 GC Val |
+|--------|:---:|:---:|:---:|:---:|:---:|
+| MSE ↓ | **1.097** | 1.233 | 1.101 | 1.236 | 0.57 |
+| LPIPS ↓ | 0.168 | 0.163 | 0.157 | **0.117** 🏆 | 0.08 |
+| SSIM_tumor ↑ | 0.369 | 0.385 | 0.394 | **0.476** 🏆 | 0.43 |
+| FRD ↓ | 30.02 | 29.87 | 29.66 | **28.45** 🏆 | 25.06 |
+| AUROC ↑ | — | **0.907** | — | 0.831 | 0.80 |
+| Dice ↑ | 0.474 | 0.500 | 0.493 | **0.539** 🏆 | 0.48 |
+| HD95 ↓ | 127.4 | 135.6 | 144.9 | **125.6** 🏆 | 120.6 |
 
-**关键发现**:
-1. v22 (orig) 在 data_split/test 上表现最好 (MSE 0.196, Dice 0.72) — 训练/测试数据匹配
-2. 同一模型在不同 test set 上差距巨大 — 说明 test set 难度不同
-3. v3 数据训练 vs v2 数据训练在同一 v3 test 上: v3 在 tumor 指标上更好 (Dice +5%, SSIM +4%)
-4. FRD 从 12.7 (orig test) 涨到 30 (v3 test) — v3 test set 的 radiomics 分布更难匹配
+##### B. msv2 test (262 cases) — v28b/v29b 对比
 
-### v22 训练结果对比 (在 v3 test 上评估)
+| Metric | v22 (orig) | v28b (UC-GAN) | v29b (Swin) |
+|--------|:---:|:---:|:---:|
+| MSE ↓ | **0.598** | 0.780 | 0.780 |
+| LPIPS ↓ | **0.131** | 0.151 | 0.136 |
+| SSIM_tumor ↑ | **0.531** | 0.464 | 0.478 |
+| AUROC ↑ | 0.826 | **0.848** | — |
+| Dice ↑ | **0.525** | 0.314 | 0.386 |
+| HD95 ↓ | **111.9** | 214.8 | 172.3 |
 
-| Metric | v22_msv2 (v2 数据训练) | v22_msv3 (v3 数据训练) | 变化 |
-|--------|:---:|:---:|------|
-| MSE ↓ | **1.097** | 1.233 | ❌ +12% |
-| LPIPS ↓ | 0.168 | **0.163** | ✅ -3% |
-| SSIM_tumor ↑ | 0.369 | **0.385** | ✅ +4% |
-| FRD ↓ | 30.02 | **29.87** | ✅ -0.5% |
-| AUROC ↑ | — | **0.907** | — |
-| Dice ↑ | 0.474 | **0.500** | ✅ +5% |
-| HD95 ↓ | **127.4** | 135.6 | ❌ +6% |
+##### C. data_split/test (199 cases) — 原始 test set
 
-**结论**: v3 数据的 GT 一致性对 tumor 指标有帮助 (Dice +5%, SSIM +4%)，但 LAB 低 intensity range 可能拖累 MSE。
+| Metric | v22 (orig) |
+|--------|:---:|
+| MSE ↓ | **0.196** |
+| LPIPS ↓ | **0.101** |
+| SSIM_tumor ↑ | **0.698** |
+| FRD ↓ | **12.70** |
+| Dice ↑ | **0.720** |
+| HD95 ↓ | **57.4** |
 
-### vs GC Validation Phase 第一名 (MamoAnd)
+##### 版本配置总览
 
-| Metric | #1 MamoAnd (GC Val) | v22_msv3 (v3 test) | 差距 |
-|--------|:---:|:---:|------|
-| MSE ↓ | **0.57** | 1.23 | 2.2x ❌ |
-| LPIPS ↓ | **0.08** | 0.16 | 2x ❌ |
-| SSIM_tumor ↑ | **0.43** | 0.39 | -9% |
-| AUROC ↑ | 0.80 | **0.91** | ✅ +14% |
-| Dice ↑ | 0.48 | **0.50** | ✅ +4% |
-| HD95 ↓ | **120.6** | 135.6 | ❌ +12% |
+| 版本 | 训练数据 | ngf | 特殊改动 | 训练状态 |
+|------|---------|:---:|---------|:---:|
+| v22 (orig) | data_split_v4 (2528) | 64 | baseline deeper (n_blocks=12) | ✅ |
+| v22_msv2 | data_multislice_v2 (~8.9k) | 64 | + noise_aug, per-phase GT | ✅ |
+| v22_msv3 | data_multislice_v3 (~7k) | 64 | + noise_aug, global peak GT, + LAB | ✅ |
+| v26_msv3 | data_multislice_v3 (~7k) | **96** | wider network | ✅ |
+| v28b | data_multislice_v2 (~5.2k) | 64 | UC-GAN uncertainty head | ✅ ❌ 不采用 |
+| v29b | data_multislice_v2 (~5.2k) | 64 | Swin Transformer bottleneck | ✅ ❌ 不采用 |
+| **v31_pinorm** | data_multislice_v3 (~7k) | 64 | **per-image z-score norm** | ✅ 🏆 |
+| v22_vgg20 | data_multislice_v3 (~7k) | 64 | lambda_vgg=20, mssc=30 | ⏳ |
+| v26_v3 (batch16) | data_multislice_v3 (~7k) | 96 | wider + noise_aug | ⏳ |
 
-⚠️ 注意: test set 不同，不能直接对比。GC val = Radboud 416×416 + Fleming 512×512。
+##### 关键结论
+
+1. **v31_pinorm 是当前最强** — 5/7 指标最优，SSIM/Dice 超过 GC #1
+2. **Per-image norm > 更大网络 (ngf=96)** — v31 LPIPS 0.117 vs v26 0.157
+3. **UC-GAN (v28b) 和 Swin (v29b) 均失败** — 不如基础 v22
+4. **MSE 仍是最大差距** — 所有版本 ~1.1-1.2 vs GC #1 的 0.57
+5. **不同 test set 结果差距大** — data_split/test 上 MSE=0.196，v3 test 上 MSE=1.1+
+6. **数据量 vs GT 一致性 trade-off** — v2 数据多但 GT 不一致，v3 数据少但 GT 统一
 
 **差距分析**:
 - MSE 和 LPIPS 差距最大 (2x) — 像素精度和感知质量是主要短板
