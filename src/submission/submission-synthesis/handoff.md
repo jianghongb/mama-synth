@@ -1552,25 +1552,35 @@ output = pre + gate(x,y) × enhancement(x,y)
 | v26 (v3 train) | data_multislice_v3 (~7k) | **ngf=96**, blocks=12 | noise_aug |
 | **v31_pinorm** | data_multislice_v3 (~7k) | ngf=64, blocks=12 | **per-image z-score norm** |
 
-**data_multislice_v3 训练数据构成** (~7042 samples):
+**data_multislice_v3 训练数据构成** (~9504 samples, updated 2026-07-05):
 
-| 来源 | Patients | Samples | Slice 策略 | GT | Tumor mask |
-|------|----------|---------|-----------|----|----|
-| DUKE | ~600 | ~2800 | peak ± 2, min_area=50 | global peak phase | 自动分割 (3D seg) |
-| ISPY2 | ~500 | ~2500 | peak ± 2, min_area=50 | global peak phase | 自动分割 (3D seg) |
-| YUNNAN | ~50 | ~250 | peak ± 2, min_area=50 | global peak phase | 自动分割 (3D seg) |
-| NACT | ~30 | ~150 | peak ± 2, min_area=50 | global peak phase | 自动分割 (3D seg) |
-| LA-Breast (train) | 63 | 734 | all slices per ROI | global peak phase (d1-d5) | **椭圆近似** (ROI coords) |
-| LA-Breast (val) | 17 | 219 | all slices per ROI | global peak phase | 椭圆近似 |
-| LA-Breast (test) | 17 | 226 | all slices per ROI | global peak phase | 椭圆近似 |
+| 来源 | Patients | Train Samples | Test Samples | Slice 策略 | GT | Tumor mask |
+|------|----------|---------|---------|-----------|----|----|
+| DUKE | ~600 | ~2800 | ~150 | peak ± 2, min_area=50 | global peak phase | 自动分割 (3D seg) |
+| ISPY2 | ~500 | ~2500 | ~100 | peak ± 2, min_area=50 | global peak phase | 自动分割 (3D seg) |
+| YUNNAN | ~50 | ~250 | ~15 | peak ± 2, min_area=50 | global peak phase | 自动分割 (3D seg) |
+| NACT | ~30 | ~150 | ~10 | peak ± 2, min_area=50 | global peak phase | 自动分割 (3D seg) |
+| LA-Breast | 97 | 1179 | ~25 | all slices per ROI | global peak phase (d1-d5) | **椭圆近似** (ROI coords) |
+| **AMBL (new)** | **631** | **2462** | **135** | **peak ± 2** | **global peak phase** | **Enhancement-based** (top 10% enhancing pixels) |
+| **Total** | | **9504** | **434** | | | |
+
+**data_multislice_v2 训练数据构成** (~11893 samples, updated 2026-07-05):
+
+| 来源 | Train Samples | Test Samples | Slice 策略 | GT |
+|------|---------|---------|-----------|-----|
+| MAMA-MIA (DUKE/ISPY2/YUNNAN/NACT) | 5227 | 262 | per-phase peak slice | each phase itself |
+| LA-Breast | 3670 | ~0 | per-phase, 5 phases | each phase itself |
+| **AMBL (new)** | **2996** | **155** | **per-phase peak slice** | **each phase itself** |
+| **Total** | **11893** | **417** | | |
 
 **数据预处理特点**:
 - Z-score normalization: MAMA-MIA global stats (mean=104.86, std=215.86) 统一用于所有数据
 - Motion cases 排除: 160 cases (from motion_cases.txt)
 - Ambiguous FOV 排除: all-different-dimension shapes skipped
 - Breast mask: Dataset930 (BreastDivider2D, distilled from 3D model)
-- 图像旋转: 90° CCW (thorax at bottom)
-- Test split: 5% per source, random seed=42, patient-level (299 test cases)
+- 图像旋转: 90° CCW (thorax at bottom) — MAMA-MIA 数据; AMBL 无旋转 (已是 axial)
+- Test split: 5% per source, random seed=42, patient-level
+- AMBL tumor mask: enhancement-based (GT - pre, top 10% pixels) 或 DICOM SEG (99 cases)
 
 **关键发现**:
 1. **v31_pinorm 在 5/7 指标上最优** — per-image norm 是最有效的单一改进
