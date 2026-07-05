@@ -1588,14 +1588,15 @@ output = pre + gate(x,y) × enhancement(x,y)
 
 | | data_multislice_v2 | data_multislice_v3 |
 |---|---|---|
-| **Slice 选取** | 每个 phase 各选自己的 peak slice | Global peak slice ± 2 邻居 |
-| **GT** | 每个 phase 自己的图像 (d1-d5) | **统一 global peak phase** |
-| **每 patient 样本数** | ~4 (4 phases) | ~3-5 (center + neighbors) |
-| **GT 一致性** | ❌ 不同 phase 增强不同 | ✅ 全部 peak enhancement |
+| **Slice 选取** | 每个 phase 各选该 phase 的 peak slice（不同 phase 可能选不同 slice 位置） | 选 global peak slice（tumor 面积最大的 slice），然后取 ±2 邻居共 5 个 slice |
+| **GT** | 每个 phase 自己的图像作为 GT（phase 1 GT = phase 1, phase 3 GT = phase 3...） | **统一用 global peak phase** 在对应 slice 位置的图像作为 GT |
+| **每 patient 样本数** | ~4 (每个 post-contrast phase 1 个) | ~3-5 (peak slice + ±2 邻居，受 min_mask_area 和边界限制) |
+| **GT 一致性** | ❌ 不同 phase 增强程度不同（early weak, peak strong） | ✅ 全部是 peak enhancement（模型目标明确） |
 | **Train (MAMA-MIA)** | 5227 | 5863 |
-| **Train (LAB)** | 3670 (per-phase) | 1179 (all slices, peak GT) |
+| **Train (LAB)** | 3670 (每 phase 各 1 个, 734 slices × 5 phases) | 1179 (每 ROI 所有 slices, peak phase GT) |
 | **Train total** | ~8897 | ~7042 |
 | **Test samples** | 262 | 299 |
+| **Breast mask** | Dataset930 | Dataset930 |
 | **LAB tumor mask** | 空 (np.zeros) | **椭圆近似** (from ROI coords) |
 
 ### v22 全版本统一结果汇总
