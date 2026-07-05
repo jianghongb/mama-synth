@@ -1482,7 +1482,16 @@ output = pre + gate(x,y) × enhancement(x,y)
 
 **脚本**: `berzelius_train_v30_sdinr.sh`
 
-**状态**: ⏳ 待验证
+**状态**: ❌ 放弃
+
+**训练结果**:
+- 仅完成 **1 epoch**，耗时 **24 小时**（~8.8s/iteration）
+- 原因: SD-INR 每次 iteration 需要 GAN forward + diffusion 多步去噪 + score distillation gradient
+- 200 epochs 需 ~200 天，48h SLURM 时限内无法完成
+- 权重已下载到本地但仅 1 epoch，未达到收敛，不具备评估价值
+
+**结论**: SD-INR 架构计算成本过高，不适合当前资源限制。
+如需类似效果（anatomy-lock + gated enhancement），建议用 v31_pinorm 的 per-image norm 替代（功能类似但零额外计算开销）。
 
 ---
 
