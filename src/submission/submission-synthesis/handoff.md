@@ -1897,6 +1897,41 @@ input (global z-score) → breast mask → per-image mean/std
 
 ---
 
+## 30b. v31b: Per-Image Norm + Huber Loss + GT Clipping
+
+**动机**: v31_pinorm 的 MSE (1.24) 主要被 10% outlier cases 拉高 (贡献 42% 总 MSE)。这些 cases 的 GT enhancement 极强 (max 24-67)，per-image de-norm 后误差放大。用 Huber loss + GT clipping 降低对极端值的敏感性。
+
+**相对 v31 的改动**:
+
+| | v31_pinorm | v31b |
+|---|---|---|
+| GT 处理 | 无 clip | **clip to P95** (`gt = clip(gt, -1, max(P95, 3.0))`) |
+| Feature/Tumor loss | L1Loss | **SmoothL1Loss (Huber)** |
+| 其余 | — | 完全相同 |
+
+**Huber Loss 特性**:
+- 误差 < 1: 用 L2 (平滑，梯度小)
+- 误差 > 1: 用 L1 (线性，不会被极端值主导)
+- 效果: 模型不会为了少数极端 pixel 牺牲整体质量
+
+**GT Clipping 特性**:
+- 对 per-image normalized GT，取 breast region 内的 P95 作为上限
+- 超过 P95 的极端 pixel 被 clip — 模型不需要追这些 outlier pixels
+- 下限 -1.0，上限 max(P95, 3.0)（保证至少允许 3 std 的增强）
+
+**预期效果**:
+- Top 30 outlier cases 的 MSE 从 5.22 降到 ~2-3
+- 整体 MSE 从 1.24 降到 ~0.8-0.9
+- LPIPS/SSIM/Dice 保持或改善（模型不再被极端值分散注意力）
+
+**脚本**: `berzelius_train_v31b_huber.sh`
+**Checkpoint**: `mamasynth_v31b`
+**推理**: 同 v31 (`infer_perimage_norm.py`)
+
+**状态**: ⏳ 待训练
+
+---
+
 ## 29. v31: Swin + UC-GAN Combined (备用)
 
 **动机**: 合并 v28 (UC-GAN uncertainty) 和 v29 (Swin Transformer bottleneck)。
