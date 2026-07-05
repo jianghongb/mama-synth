@@ -1663,7 +1663,142 @@ output = pre + gate(x,y) × enhancement(x,y)
 
 ---
 
-## 28. v30: v22 Retrain on data_multislice_v2 + LA-Breast + noise_aug
+## 28b. v26_msv3: Wider Network (ngf=96) on data_multislice_v3 (2026-07-04)
+
+**动机**: v26 (ngf=96, n_blocks=12) 是 data_split_v4 上的最强单模型。在 data_multislice_v3 (global peak GT + LAB + 邻居 slice) 上训练更大网络，验证是否继续受益于更大容量。
+
+**配置**:
+
+| 参数 | v22_msv3 (基线) | v26_msv3 (本次) |
+|------|----------------|----------------|
+| ngf | 64 | **96** |
+| n_blocks | 12 | **12** |
+| 参数量 | ~184M | **538M** |
+| 权重大小 | ~700MB | **2.0 GB** |
+| 数据 | data_multislice_v3 (~7042) | data_multislice_v3 (~7042) |
+| breast_mask | ✅ | ✅ |
+| noise_aug | ✅ | ✅ |
+| intensity_aug | ✅ | ✅ |
+| batchSize | 16 | **16** |
+| lr | 0.0003 | 0.0003 |
+| epochs | 200 | 200 |
+
+**训练**: Berzelius job 17020204 (`v26_msv3`), 运行时间 1d 3h 39min, COMPLETED
+**脚本**: `berzelius_train_v26_deeper_v3.sh` (`--name mamasynth_v26_v3`)
+**权重**: `latest_net_G-v26_msv3.pth` (2.0 GB, 538M params, 68 keys)
+
+### 结果 (data_multislice_v3/test, 299 cases)
+
+| Metric | v26_msv2 (best, msv2 test) | v26_msv3 (本次, msv3 test) | v22_msv3 (msv3 test) |
+|--------|:---:|:---:|:---:|
+| MSE ↓ | **0.573** | 1.101 | 1.233 |
+| LPIPS ↓ | **0.127** | 0.157 | 0.163 |
+| SSIM_tumor ↑ | **0.551** | 0.394 | 0.385 |
+| FRD ↓ | — | **29.66** | 29.87 |
+| Dice ↑ | **0.537** | 0.493 | 0.500 |
+| HD95 ↓ | **110.3** | 144.9 | 135.6 |
+
+### 与 v22_msv3 对比 (同 test set)
+
+| Metric | v22_msv3 (ngf=64) | v26_msv3 (ngf=96) | 变化 |
+|--------|:---:|:---:|------|
+| MSE ↓ | 1.233 | **1.101** | ✅ -11% |
+| LPIPS ↓ | 0.163 | **0.157** | ✅ -4% |
+| SSIM_tumor ↑ | 0.385 | **0.394** | ✅ +2% |
+| FRD ↓ | 29.87 | **29.66** | ✅ -1% |
+| Dice ↑ | **0.500** | 0.493 | ❌ -1% |
+| HD95 ↓ | **135.6** | 144.9 | ❌ +7% |
+
+### 分析
+
+1. **vs v22_msv3**: ngf=96 在像素指标 (MSE -11%, LPIPS -4%) 和 tumor 结构 (SSIM +2%) 上有提升，但分割指标 (Dice -1%, HD95 +7%) 略退步。容量增大改善了像素保真度但未改善 tumor 边界精度。
+
+2. **vs v26_msv2**: v26_msv2 在 msv2 test 上全面优于 v26_msv3 在 msv3 test 上的表现。差距主要来自:
+   - msv3 test 更难 (包含 LAB 数据、多分辨率 256-896)
+   - msv3 训练数据量少于 msv2 (7k vs 8.9k)
+   - 大模型在有限数据上可能过拟合
+
+3. **容量增大的收益递减**: 538M params (ngf=96) vs 184M (ngf=64)，参数量增加 2.9x 但 MSE 只降 11%。在 7k 样本的 data_multislice_v3 上，模型容量已经过剩。
+
+### 结论
+
+- ❌ **v26_msv3 不是最佳选择** — 大模型在有限数据 (7k) 上收益不大
+- ✅ **v26_msv2 仍是 multislice 系列最佳** — 数据量 (8.9k) 和匹配的 test set
+- ⚠️ 如果要在 msv3 数据路线上继续，应恢复邻居 slice 增大训练量而非增大模型
+
+**状态**: ✅ 完成 — 不采用作为最终提交
+
+---
+
+## 30. v31: Per-Image Z-Score Normalization (pinorm)
+
+**动机**: 消除 cross-scanner intensity variation。每张图用自己 breast-region 的 mean/std 归一化，模型在 canonical space (mean≈0, std≈1) 中学习。推理时 normalize → model → de-normalize 回 global z-score space。
+
+**架构**: 同 v22 (GlobalGenerator, ngf=64, n_blocks=12, residual_mode)
+**关键改动**: `--dataset_mode mha_perimage_norm`
+
+**训练流程**:
+```
+input (global z-score) → 提取 breast region mean/std
+    → per-image re-normalize: (input - mean) / std × breast_mask
+    → model learns in canonical space
+    → GT 也用同样的 mean/std normalize
+```
+
+**推理流程**:
+```
+input (global z-score) → breast mask → per-image mean/std
+    → normalize → model → de-normalize (× std + mean)
+    → composite: breast = de-normed output, background = original input
+```
+
+**配置**:
+
+| 参数 | 值 |
+|------|-----|
+| 数据 | data_multislice_v3/train (~7042) |
+| Dataset mode | mha_perimage_norm |
+| Breast mask | Dataset930 (用于定义 foreground) |
+| ngf | 64 |
+| n_blocks | 12 |
+| batch | 16 |
+| lr | 0.0003 |
+| noise_aug | ✅ |
+| intensity_aug | ✅ (scale only, [0.8, 1.2]) |
+| 脚本 | `berzelius_train_v31_pinorm.sh` |
+| Checkpoint | `mamasynth_v31_pinorm` |
+
+**结果 (data_multislice_v3 test, 299 cases)**:
+
+| Metric | v22_msv3 | v22_msv2 | **v31_pinorm** | #1 GC Val |
+|--------|:---:|:---:|:---:|:---:|
+| MSE ↓ | 1.233 | **1.097** | 1.236 | 0.57 |
+| LPIPS ↓ | 0.163 | 0.168 | **0.117** 🏆 | 0.08 |
+| SSIM_tumor ↑ | 0.385 | 0.369 | **0.476** 🏆 | 0.43 |
+| FRD ↓ | 29.87 | 30.02 | **28.45** 🏆 | 25.06 |
+| AUROC ↑ | **0.907** | — | 0.831 | 0.80 |
+| Dice ↑ | 0.500 | 0.474 | **0.539** 🏆 | 0.48 |
+| HD95 ↓ | 135.6 | 127.4 | **125.6** 🏆 | 120.6 |
+
+**分析**:
+- 🏆 **5/7 指标最优** — LPIPS, SSIM, FRD, Dice, HD95 全部领先
+- LPIPS 0.117 vs v22 的 0.163 (**-28%**) — 感知质量大幅提升
+- SSIM_tumor 0.476 **超过 GC #1** (0.43)
+- Dice 0.539 **超过 GC #1** (0.48)
+- MSE 和 v22_msv3 持平 — per-image norm 不影响像素精度
+- AUROC 0.831 略低于 v22_msv3 (0.907) — 可能因为 de-norm 后 contrast signal 有轻微偏移
+
+**De-normalization Bug Fix**:
+- 初始推理背景 = `0 × std + mean = mean`（错误），导致 MSE=3.28, LPIPS=0.29
+- 修复后背景 = 原始 input 值（正确），MSE 降到 1.24, LPIPS 降到 0.12
+- 教训: per-image norm 的 de-norm 必须正确处理 mask 边界
+
+**结论**: Per-image normalization 是当前最有效的单一改进。消除了 scanner-specific intensity bias，让模型专注于学习增强 pattern。
+
+**下一步**:
+1. v26_v3 + pinorm (ngf=96 + per-image norm) — 预期进一步降低 MSE
+2. v31_pinorm + SDEdit refiner — 叠加 diffusion 精修
+3. Ensemble: v31_pinorm + v22_msv3 + v26_v3 — 多模型平均
 
 **动机**: v22 是最强单模型，在新数据集上重训并加入：
 1. LA-Breast 外部数据（+3670 samples）

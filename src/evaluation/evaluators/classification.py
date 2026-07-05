@@ -75,13 +75,7 @@ class RadiomicsClassifier:
                 self.model = pickle.load(f)  # noqa: S301
             # Fix xgboost compatibility: old models have use_label_encoder
             # attribute that was removed in xgboost >= 1.6
-            try:
-                from xgboost import XGBClassifier
-                if isinstance(self.model, XGBClassifier):
-                    if hasattr(self.model, 'use_label_encoder'):
-                        delattr(self.model, 'use_label_encoder')
-            except (ImportError, AttributeError):
-                pass
+            self._fix_xgboost_compat(self.model)
         elif model is not None:
             self.model = model
         else:
@@ -108,6 +102,29 @@ class RadiomicsClassifier:
     def train(self, features: np.ndarray, labels: np.ndarray) -> None:
         features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
         self.model.fit(features, labels)
+
+    @staticmethod
+    def _fix_xgboost_compat(model: Any) -> None:
+        """Remove deprecated use_label_encoder from XGBClassifier (xgboost >= 1.6)."""
+        try:
+            from xgboost import XGBClassifier
+        except ImportError:
+            return
+        # Direct XGBClassifier
+        if isinstance(model, XGBClassifier):
+            if hasattr(model, 'use_label_encoder'):
+                delattr(model, 'use_label_encoder')
+            return
+        # sklearn Pipeline: check each step
+        if hasattr(model, 'steps'):
+            for _, step in model.steps:
+                if isinstance(step, XGBClassifier) and hasattr(step, 'use_label_encoder'):
+                    delattr(step, 'use_label_encoder')
+        # VotingClassifier or similar: check estimators
+        if hasattr(model, 'estimators_'):
+            for est in model.estimators_:
+                if isinstance(est, XGBClassifier) and hasattr(est, 'use_label_encoder'):
+                    delattr(est, 'use_label_encoder')
 
     def predict_proba(self, features: np.ndarray) -> np.ndarray:
         features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
