@@ -1852,10 +1852,35 @@ input (global z-score) → breast mask → per-image mean/std
 
 **结论**: Per-image normalization 是当前最有效的单一改进。消除了 scanner-specific intensity bias，让模型专注于学习增强 pattern。
 
+**MSE Outlier 分析**:
+
+| 统计 | 值 |
+|------|-----|
+| Mean MSE | 1.236 |
+| **Median MSE** | **0.401** |
+| Top 30 cases (10%) 贡献 | **42.4%** 的总 MSE |
+| Top 30 平均 MSE | 5.22 |
+| 如果修复 top 30 | MSE 降到 **0.75** |
+| Outlier 来源 | ISPY2 (20), DUKE (10), LAB (0) |
+
+**Outlier 根因**:
+- 这些 cases 的 GT intensity 极高 (max 24-31)，是强增强 cases
+- ISPY2_138027: per-image de-norm 放大误差 (input std=3.05, ×3 放大)
+- DUKE_244: breast mask 只覆盖 9%，GT 在 breast 区域有极高值
+- ISPY2_971492: GT 增强 4.75x，模型追不上
+- 共同点: per-image norm 用 mean/std 做 de-norm，极端 intensity 的 case std 很大，de-norm 后误差被放大
+
+**改善方向**:
+1. 推理时限制 enhancement 幅度 (clip output - input)
+2. 用 robust stats (median/MAD) 替代 mean/std 做 per-image norm
+3. 训练时 GT percentile clipping
+4. Huber loss 替代 L1/L2
+
 **下一步**:
 1. v26_v3 + pinorm (ngf=96 + per-image norm) — 预期进一步降低 MSE
 2. v31_pinorm + SDEdit refiner — 叠加 diffusion 精修
 3. Ensemble: v31_pinorm + v22_msv3 + v26_v3 — 多模型平均
+4. 修复 outlier cases 的 de-norm 策略 — 从 1.24 降到 0.75 的潜力
 
 **动机**: v22 是最强单模型，在新数据集上重训并加入 noise_aug、更多数据、优化 GPU 利用率。
 
