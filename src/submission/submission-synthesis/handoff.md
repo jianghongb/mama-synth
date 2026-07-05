@@ -1946,3 +1946,77 @@ Input → Encoder (4× downsample)
 **配置**: 同 v30 但加 `--uncertainty --swin_bottleneck`
 **脚本**: `berzelius_train_v31_swin_ucgan.sh`
 **状态**: 待 v30 结果后决定是否训练
+
+---
+
+## 📊 全版本评估结果汇总 (按版本排序)
+
+> 快速参考表。详细分析见各版本对应章节。
+
+### 一、在 data_split/test (199 cases) 上的结果
+
+训练数据: data_split_v4 (2528 axial cases, single peak slice per patient)
+
+| 版本 | ngf | 特殊改动 | MSE ↓ | LPIPS ↓ | SSIM ↑ | FRD ↓ | AUROC ↑ | Dice ↑ | HD95 ↓ |
+|------|:---:|---------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| v14 | 64 | baseline + breast mask | 0.212 | 0.126 | 0.689 | 11.90 | 0.831 | 0.703 | 68.9 |
+| v17 | 64 | v14 + SDEdit refiner | 0.216 | **0.109** | 0.688 | **10.54** | 0.829 | **0.731** | **62.8** |
+| v20 | 64 | Dataset920 mask (train=infer) | 0.191 | 0.100 | 0.704 | 12.52 | — | 0.718 | 67.0 |
+| **v22** | 64 | n_blocks=12 (deeper) | 0.196 | 0.101 | 0.698 | 12.70 | — | 0.720 | 57.4 |
+| **v26** | **96** | wider + deeper | **0.181** | **0.100** | **0.713** | 12.47 | 0.843 | **0.730** | 63.3 |
+
+### 二、在 data_multislice_v2 test (262 cases) 上的结果
+
+| 版本 | 训练数据 | ngf | 特殊改动 | MSE ↓ | LPIPS ↓ | SSIM ↑ | AUROC ↑ | Dice ↑ | HD95 ↓ |
+|------|---------|:---:|---------|:---:|:---:|:---:|:---:|:---:|:---:|
+| v22 (orig) | data_split_v4 | 64 | — | **0.598** | **0.131** | **0.531** | 0.826 | **0.525** | **111.9** |
+| v26b | msv2 (无 breast mask) | 96 | — | 0.744 | 0.137 | 0.501 | — | 0.417 | 158.2 |
+| v28b | msv2 | 64 | UC-GAN | 0.780 | 0.151 | 0.464 | **0.848** | 0.314 | 214.8 |
+| v29b | msv2 | 64 | Swin bottleneck | 0.780 | 0.136 | 0.478 | — | 0.386 | 172.3 |
+
+### 三、在 data_multislice_v3 test (299 cases) 上的结果 — 主要对比
+
+| 版本 | 训练数据 | ngf | 特殊改动 | MSE ↓ | LPIPS ↓ | SSIM ↑ | FRD ↓ | AUROC ↑ | Dice ↑ | HD95 ↓ |
+|------|---------|:---:|---------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| v22_msv2 | msv2 (~8.9k) | 64 | noise_aug, per-phase GT | **1.097** | 0.168 | 0.369 | 30.02 | — | 0.474 | 127.4 |
+| v22_msv3 | msv3 (~7k) | 64 | noise_aug, peak GT + LAB | 1.233 | 0.163 | 0.385 | 29.87 | **0.907** | 0.500 | 135.6 |
+| v26_msv3 | msv3 (~7k) | **96** | wider + noise_aug | 1.101 | 0.157 | 0.394 | 29.66 | — | 0.493 | 144.9 |
+| **v31_pinorm** | msv3 (~7k) | 64 | **per-image z-score** | 1.236 | **0.117** 🏆 | **0.476** 🏆 | **28.45** 🏆 | 0.831 | **0.539** 🏆 | **125.6** 🏆 |
+| v22_vgg20 | msv3 (~7k) | 64 | lambda_vgg=20, mssc=30 | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
+
+### 四、GC Validation Phase #1 参考
+
+| Metric | #1 MamoAnd | **v31_pinorm (ours)** | 差距 |
+|--------|:---:|:---:|------|
+| MSE ↓ | **0.57** | 1.24 | 2.2x ❌ |
+| LPIPS ↓ | **0.08** | 0.12 | 1.5x ❌ |
+| SSIM_tumor ↑ | 0.43 | **0.48** | ✅ +12% |
+| FRD ↓ | **25.06** | 28.45 | ❌ +14% |
+| AUROC ↑ | 0.80 | **0.83** | ✅ +4% |
+| Dice ↑ | 0.48 | **0.54** | ✅ +13% |
+| HD95 ↓ | 120.6 | **125.6** | ≈ 持平 |
+
+⚠️ Test set 不同，不能直接对比。仅作方向性参考。
+
+### 五、版本演进总结
+
+| 阶段 | 版本 | 关键创新 | 结果 |
+|------|------|---------|------|
+| Baseline | v14 | breast mask + intensity_aug | Dice 0.70 |
+| Refiner | v17 | + SDEdit diffusion | Dice 0.73, LPIPS -14% |
+| Consistency | v20 | train/infer mask 一致 | MSE -10% |
+| Deeper | v22 | n_blocks 9→12 | HD95 -15% |
+| Wider | v26 | ngf 64→96 | MSE -8% |
+| ❌ UC-GAN | v28b | uncertainty head | 全面退步 |
+| ❌ Swin | v29b | transformer bottleneck | 全面退步 |
+| **🏆 Per-image norm** | **v31** | **per-image z-score** | **LPIPS -28%, SSIM +24%, Dice +8%** |
+
+### 六、当前最佳模型
+
+**v31_pinorm** — Per-Image Z-Score Normalization
+
+- 权重: `checkpoints/mamasynth_v31_pinorm/latest_net_G.pth`
+- 推理: `models/infer_perimage_norm.py` (需 breast mask + de-norm)
+- 优势: SSIM/Dice 超过 GC #1，LPIPS 接近
+- 劣势: MSE 仍有 2x 差距
+- 下一步: v26 + pinorm (ngf=96 降 MSE) + SDEdit refiner (降 LPIPS)
