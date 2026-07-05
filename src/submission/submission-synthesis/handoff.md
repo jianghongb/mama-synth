@@ -1882,38 +1882,18 @@ input (global z-score) → breast mask → per-image mean/std
 3. Ensemble: v31_pinorm + v22_msv3 + v26_v3 — 多模型平均
 4. 修复 outlier cases 的 de-norm 策略 — 从 1.24 降到 0.75 的潜力
 
-**动机**: v22 是最强单模型，在新数据集上重训并加入 noise_aug、更多数据、优化 GPU 利用率。
 
-**两次训练**:
 
-| | v22_msv2 (第一次) | v22_msv3 (第二次) |
-|---|---|---|
-| 数据 | data_multislice_v2/train (~8.9k) | data_multislice_v3/train (~7.0k) |
-| GT 策略 | per-phase peak (GT 不一致) | **global peak phase (GT 一致)** |
-| LAB 数据 | 3670 (per-phase, 无 tumor mask) | 1179 (all slices, 椭圆 tumor mask) |
-| Job | 17019506 (killed at 480 iter) → 重跑完成 | 17020194 ✅ 完成 (18h 27min) |
-| Checkpoint | `mamasynth_v22` | `mamasynth_v22_v3` |
+  
+**解决方向**:
+最有效（不改训练）：
+1. 推理时限制 enhancement 幅度 — output = input + clip(output - input, 0, input.max() * factor)
+2. 改善 de-norm 对极端 intensity 的鲁棒性 — 用 robust stats (median/MAD 替代 mean/std)
+改训练：
+3. Huber loss — 对极端像素误差不那么敏感
+4. 训练时 GT clip — gt = clip(gt, -1, percentile_95) 避免模型追极端值
 
-**配置** (两次共同):
 
-| 参数 | v22 (原) | v22_msv2 / v22_msv3 |
-|------|---------|---------|
-| Breast mask | Dataset920 | Dataset930 |
-| noise_aug | ❌ | ✅ (input σ=0.02-0.05, GT σ=0.02-0.08) |
-| intensity_aug | ✅ | ✅ |
-| batchSize | 8 | 16 |
-| nThreads | 0 | 16 |
-| lr | 0.0002 | 0.0003 |
-| ngf | 64 | 64 |
-| n_blocks | 12 | 12 |
-| residual_mode | ✅ | ✅ |
-| epochs | 200 | 200 |
-
-**脚本**:
-- v22_msv2: `berzelius_train_v22_deeper.sh`
-- v22_msv3: `berzelius_train_v22_deeper_v3.sh`
-
-**状态**: ✅ 两次均已完成，结果见 "所有版本在 v3 test 上的对比" 表
 
 ---
 
