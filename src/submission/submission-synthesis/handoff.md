@@ -1955,7 +1955,75 @@ input (global z-score) → breast mask → per-image mean/std
 3. Huber loss — 对极端像素误差不那么敏感
 4. 训练时 GT clip — gt = clip(gt, -1, percentile_95) 避免模型追极端值
 
+### Bad Case 可视化分析 (2026-07-05)
 
+对 8 个 worst cases 生成了 5 列可视化 (Pre / GT / Pred / |Diff| / Pred+Mask)：
+→ `bad_cases_v31_pinorm/*.png`
+
+#### 失败模式 1: 增强信号不足 (Enhancement Under-prediction)
+
+**Cases**: DUKE_641 (SSIM=-0.28), YUNNAN_031, YUNNAN_088
+
+**现象**: GT 有非常强的局部增强（肿瘤明显变亮），prediction 几乎无增强，output ≈ input。
+
+**根因**:
+- Per-image norm 后模型学了"保守"residual，不敢产生大幅增强
+- YUNNAN 训练量极少 (<5%)，高分辨率 896×896 强增强 pattern 学习不足
+- DUKE_641 tumor mask 在乳房深处，模型对该区域的增强建模弱
+
+**改善**: tumor_weight 10→30-50；Enhancement-aware loss；YUNNAN oversampling
+
+#### 失败模式 2: 全图强度偏移 (Global Intensity Shift)
+
+**Cases**: ISPY2_138027 (MSE=8.78), DUKE_244 (MSE=5.84), DUKE_032, DUKE_134
+
+**现象**: 差异热力图几乎全图亮，不是局部错误而是全局 scale 偏移。
+
+**根因**:
+- Per-image de-norm 用 breast region mean/std，如果 breast mask 不准或组织比例异常，de-norm 后全图偏移
+- ISPY2_138027: GT 增强后脂肪抑制效果导致整体暗化，模型无法预测全局 contrast change
+- DUKE_244: 心脏/纵隔区域大，breast mask 可能包含非乳房组织
+
+**改善**: Huber loss (v31b ⏳); robust de-norm (median/MAD); GT clipping
+
+#### 失败模式 3: 下游分割模型失败 (Downstream Segmentation Failure)
+
+**Cases**: DUKE_032 (Dice=0), DUKE_134 (Dice=0), YUNNAN_031/088 (HD95=1267)
+
+**现象**: 合成图看起来尚可，但 nnUNet 返回空 mask → Dice=0。
+
+**根因**:
+- 小 tumor 在边缘 + 增强信号不够强 → 分割模型检测不到
+- YUNNAN 896→512 resize 后 tumor 只有几像素，分割模型无法检测
+- 部分是 evaluation pipeline 局限，不完全是合成质量问题
+
+**改善**: 对小 tumor 加更大权重; multi-scale tumor loss; 评估时这些 case 可能无法根本改善
+
+#### Per-Dataset 表现
+
+| Dataset | n | MSE ↓ | LPIPS ↓ | SSIM_tumor ↑ | Dice ↑ | HD95 ↓ |
+|---------|---|:---:|:---:|:---:|:---:|:---:|
+| YUNNAN | 25 | **0.033** 🏆 | **0.060** 🏆 | **0.755** 🏆 | 0.242 | 518.6 ❌ |
+| DUKE | 55 | 1.566 | 0.124 | 0.313 | 0.369 | 191.7 |
+| ISPY2 | 219 | 1.291 | 0.121 | 0.485 | **0.616** 🏆 | **64.2** 🏆 |
+
+- YUNNAN: 像素最优但分割最差（高分辨率 + nnUNet 失效）
+- ISPY2: 分割最好（256×256 = 分割模型训练分辨率）
+- DUKE: 整体中等，少数 patient 是极端 bad case
+
+#### Dice=0 分布 (64/299 = 21%)
+
+主要来自 DUKE (032/134/244 等) 和 YUNNAN — 合成增强信号不够强或分割模型在特定分辨率上失效。
+
+#### 优化优先级
+
+| 优先级 | 方向 | 预期改善 | 状态 |
+|:---:|------|---------|------|
+| 1 | Huber loss + GT clipping | MSE ↓ (outlier) | v31b ⏳ 训练中 |
+| 2 | tumor_weight 10→30-50 | Dice ↑, SSIM ↑ | 下一版 |
+| 3 | 改进 de-norm (robust stats) | MSE ↓ (全局偏移) | 需实验 |
+| 4 | SDEdit refiner on v31 | LPIPS ↓, Dice ↑ | v17 已验证 |
+| 5 | Ensemble v31 + v26_msv2 | 全指标互补 | 推理时 |
 
 ---
 
@@ -2086,3 +2154,46 @@ Input → Encoder (4× downsample)
 - 优势: SSIM/Dice 超过 GC #1，LPIPS 接近
 - 劣势: MSE 仍有 2x 差距
 - 下一步: v26 + pinorm (ngf=96 降 MSE) + SDEdit refiner (降 LPIPS)
+
+---
+
+## 29. Supervisor 汇报总结 (2026-07-06)
+
+### 最新成果：v31 Per-Image Normalization 🏆
+
+**核心创新**：将传统的 global z-score normalization 替换为 per-image foreground z-score。每张图片独立用 breast region 的 mean/std 归一化，消除跨 scanner 的 intensity 差异。推理时做反变换回原始空间。
+
+**在 data_multislice_v3 test (299 cases) 上的结果**：
+
+| Metric | v31 (ours) | GC 排名 #1 | 对比 |
+|--------|:---:|:---:|:---:|
+| LPIPS ↓ | 0.117 | 0.08 | 差距缩小到 1.5x |
+| SSIM_tumor ↑ | **0.476** | 0.43 | ✅ **超过 #1** |
+| Dice ↑ | **0.539** | 0.48 | ✅ **超过 #1** |
+| HD95 ↓ | 125.6 | 120.6 | ≈ 持平 |
+| MSE ↓ | 1.24 | 0.57 | ❌ 仍有 2x 差距 |
+
+### 已验证方案总结
+
+| 方案 | 结论 |
+|------|------|
+| **Per-image normalization (v31)** | ✅ 最佳 — SSIM/Dice/LPIPS 全面提升 |
+| Wider network ngf=96 (v26) | ✅ MSE 最优，但其他指标不如 v31 |
+| 增大 VGG loss (lambda_vgg=20) | ❌ 不能改善 LPIPS |
+| UC-GAN uncertainty (v28) | ❌ 全面退步，废弃 |
+| Swin Transformer (v29) | ❌ 改善不显著 |
+| Semi-Disentangled INR (v30) | ❌ 计算成本过高（1 epoch=24h），放弃 |
+| Spatial weighting (v27) | ❌ 改善 SSIM-tumor 但损害 MSE |
+
+### 关键发现
+
+1. **数据量 > 架构创新**：多 slice augmentation (~23k) 比改架构重要
+2. **Normalization 是被低估的因素**：per-image norm 零额外计算成本，效果显著
+3. **GC 评估的 MSE 差距主要来自 outlier cases**（intensity 异常偏移的 case）
+4. **Breast masking 必须训练时启用**——推理时硬 mask composite 反而有害
+
+### 下一步计划
+
+1. **v26 + per-image norm**：结合大网络 (ngf=96) + per-image normalization — 预期两者优势叠加
+2. **SDEdit refiner on v31**：用 diffusion 精修 v31 输出，进一步提升边界质量
+3. **Docker 提交 GC**：v31 已具备提交条件
