@@ -37,6 +37,7 @@ echo "=== Step 1: Convert MHA → nnUNet format (32 threads) ==="
 python -c "
 import json, os, sys
 import numpy as np
+import nibabel as nib
 import SimpleITK as sitk
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -53,6 +54,8 @@ LABELS_DIR.mkdir(parents=True, exist_ok=True)
 input_files = sorted(INPUT_DIR.glob('*.mha'))
 print(f'Total input files: {len(input_files)}')
 
+affine = np.eye(4)
+
 def process_one(f):
     mask_path = MASK_DIR / f.name
     if not mask_path.exists():
@@ -68,22 +71,17 @@ def process_one(f):
         return case_id, 'exists'
 
     # Read mask, skip if empty
-    mask_img = sitk.ReadImage(str(mask_path))
-    mask_arr = sitk.GetArrayFromImage(mask_img).squeeze()
+    mask_arr = sitk.GetArrayFromImage(sitk.ReadImage(str(mask_path))).squeeze()
     if mask_arr.sum() < 10:
         return None, 'empty'
 
     # Read input
-    input_img = sitk.ReadImage(str(f))
-    input_arr = sitk.GetArrayFromImage(input_img).astype(np.float32).squeeze()
+    input_arr = sitk.GetArrayFromImage(sitk.ReadImage(str(f))).astype(np.float32).squeeze()
 
-    # Save as NIfTI (shape: 1, H, W for 2D nnUNet)
-    out_img = sitk.GetImageFromArray(input_arr[np.newaxis, :, :])
-    sitk.WriteImage(out_img, str(out_img_path))
-
-    mask_out = mask_arr.astype(np.uint8)[np.newaxis, :, :]
-    out_mask = sitk.GetImageFromArray(mask_out)
-    sitk.WriteImage(out_mask, str(out_lbl_path))
+    # Save as NIfTI using nibabel (much faster than sitk for writing)
+    # Shape: (H, W, 1) for 2D nnUNet
+    nib.save(nib.Nifti1Image(input_arr[:, :, np.newaxis], affine), str(out_img_path))
+    nib.save(nib.Nifti1Image(mask_arr.astype(np.uint8)[:, :, np.newaxis], affine), str(out_lbl_path))
 
     return case_id, 'ok'
 
