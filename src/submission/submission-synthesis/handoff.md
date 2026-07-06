@@ -2058,7 +2058,62 @@ input (global z-score) → breast mask → per-image mean/std
 **Checkpoint**: `mamasynth_v31b`
 **推理**: 同 v31 (`infer_perimage_norm.py`)
 
-**状态**: ⏳ 待训练
+**结果 (data_multislice_v3/test, 299 cases)**:
+
+| Metric | v31_pinorm | v31b_huber | 变化 |
+|--------|:---:|:---:|------|
+| MSE ↓ | 1.236 | **1.017** | ✅ -18% |
+| LPIPS ↓ | **0.117** | 0.127 | ❌ +9% |
+| SSIM_tumor ↑ | **0.476** | 0.337 | ❌ -29% |
+| FRD ↓ | 28.45 | **23.81** | ✅ -16% |
+| Dice ↑ | **0.539** | 0.298 | ❌ -45% |
+| HD95 ↓ | **125.6** | 267.3 | ❌ +113% |
+
+**分析**: Huber loss + GT clipping 成功降 MSE (-18%) 和 FRD (-16%)，但 **Dice 崩溃** (-45%)。GT clipping (P95) 截掉了 tumor 区域的强增强像素 → 模型学到「不要产生强增强」→ nnUNet 检测不到 tumor。FRD 改善是假象（特征分布更平滑，但增强信号被抹掉）。
+
+**结论**: ❌ GT clipping 太激进。如需降 MSE，应只 clip 背景区域，保留 tumor 区域极端值。
+
+**状态**: ✅ 完成 — 不采用
+
+---
+
+## 30c. v31_msv2: Per-Image Norm on data_multislice_v2 (2026-07-06)
+
+**动机**: 验证 per-image norm 在更大数据集 (v2, ~11893 samples) 上是否更好。v2 数据包含 per-phase GT（每个 phase 各自的增强图像作为 GT）。
+
+**配置**:
+| 参数 | v31_pinorm (v3 数据) | v31_msv2 (v2 数据) |
+|------|:---:|:---:|
+| 数据 | data_multislice_v3 (~7042) | data_multislice_v2 (~11893) |
+| GT 策略 | Global peak phase (统一) | Per-phase (不同 phase 各自 GT) |
+| 其余 | 完全相同 | 完全相同 |
+
+**训练**: Berzelius job 17025748 (`v31_msv2`), 运行时间 ~20h, COMPLETED
+**脚本**: `berzelius_train_v31_msv2.sh`
+
+**结果 (v3 test, 434 cases — 含 AMBL)**:
+
+| Metric | v31_pinorm (v3 train) | v31_msv2 (v2 train) | #1 GC Val |
+|--------|:---:|:---:|:---:|
+| MSE ↓ | 1.236 | **1.022** ✅ | 0.57 |
+| LPIPS ↓ | **0.117** | 0.127 | 0.08 |
+| SSIM_tumor ↑ | **0.476** | 0.310 ❌ | 0.43 |
+| FRD ↓ | 28.45 | **23.66** ✅ 🏆 | 25.06 |
+| AUROC ↑ | **0.831** | 0.563 ❌ | 0.80 |
+| Dice ↑ | **0.539** | 0.257 ❌ | 0.48 |
+| HD95 ↓ | **125.6** | 302.6 ❌ | 120.6 |
+
+**分析**:
+- ✅ MSE 最低 (1.022) — 数据量优势 (11893 vs 7042)
+- ✅ FRD 23.66 **超过 GC #1** (25.06) — radiomics 分布最真实
+- ❌ Dice/HD95/SSIM/AUROC 全崩 — v2 per-phase GT 不一致导致模型学到了模糊的增强 pattern
+- ⚠️ Test set 434 cases (含 AMBL)，和之前 299 cases 不完全可比
+
+**结论**: 再次确认 **GT 一致性 > 数据量**。v2 有 1.7× 数据量但 GT 不一致（每个 phase 各自做 GT），模型学不到清晰的 tumor 增强。v3 数据用统一 global peak GT，虽然量少但结果更均衡。
+
+**决策**: 继续在 v3 数据路线上开发。v31_pinorm 仍为最佳版本。
+
+**状态**: ✅ 完成 — 不采用
 
 ---
 
@@ -2197,3 +2252,122 @@ Input → Encoder (4× downsample)
 1. **v26 + per-image norm**：结合大网络 (ngf=96) + per-image normalization — 预期两者优势叠加
 2. **SDEdit refiner on v31**：用 diffusion 精修 v31 输出，进一步提升边界质量
 3. **Docker 提交 GC**：v31 已具备提交条件
+
+---
+
+## 30. Supervisor 方案: T1w Tumor Segmentation + Conditional GAN (2026-07-06)
+
+### 核心思路
+
+从 pre-contrast T1w 上先做乳腺+肿瘤分割，让 GAN 在推理时**显式知道肿瘤在哪**，集中算力在 tumor 区域产生强增强。
+
+### 推理流程
+
+```
+Pre-contrast input (.mha)
+        │
+        ├─→ [BreastDivider 2D] → breast_mask         (已有, Dataset930)
+        │
+        ├─→ [T1w Tumor Seg] → predicted_tumor_mask   (新, Dataset940)
+        │
+        ├─→ [Conditional GAN]
+        │     输入: concat(pre, breast_mask, tumor_mask) — 3 channels
+        │     → synthetic post-contrast
+        │
+        └─→ output = breast_mask × synthetic + (1-breast_mask) × pre
+```
+
+### 实施步骤
+
+| 步骤 | 任务 | 状态 | 预计时间 |
+|------|------|------|---------|
+| 1 | 训练 T1w → tumor segmentation (nnUNet 2D, Dataset940) | ⏳ 已提交 | ~12h |
+| 2 | 对训练集推理 → predicted_tumor_mask/ | 待 Step 1 完成 | ~1h |
+| 3 | 修改 GAN input_nc=1→3，训练 v32 (pre + breast + tumor) | 待 Step 2 完成 | ~18h |
+| 4 | Docker 推理 pipeline 整合 | 待 Step 3 完成 | 代码改动 |
+
+### Step 1: T1w Tumor Segmentation
+
+**为什么从 pre-contrast 能分割 tumor？**
+
+虽然 tumor 在 T1w pre-contrast 上增强不明显（造影剂的作用就是让 tumor 可见），但 AI 可能利用：
+- 信号强度差异（tumor 组织 vs 正常乳腺组织）
+- 形态学差异（边界不规则的 mass）
+- 组织结构破坏（导管扭曲等）
+
+即使分割精度不高（Dice ~0.3-0.5），只要能提供一个**粗略空间定位**，就能指导 GAN 集中增强。
+
+**训练配置**:
+- 模型: nnUNet 2D, fold 0
+- Dataset ID: 940 (Dataset940_TumorSegT1w)
+- 输入: pre-contrast MHA (1 channel, z-score normalized)
+- 标签: binary tumor mask (0=background, 1=tumor)
+- 训练数据: data_multislice_v3/train/mha/{input, mask} (~9504 samples，跳过 empty masks)
+- 脚本: `berzelius_train_tumor_seg_t1w.sh`
+
+### Step 2: Generate Predicted Masks
+
+训练完后，对**训练集和测试集**分别推理：
+```bash
+# 对训练集推理（GAN 训练时用 predicted mask，不用 GT）
+nnUNetv2_predict -d 940 -c 2d -f 0 \
+  -i $PROJ/data_multislice_v3/train/mha/input_nifti/ \
+  -o $PROJ/data_multislice_v3/train/mha/predicted_tumor/
+
+# 对测试集推理
+nnUNetv2_predict -d 940 -c 2d -f 0 \
+  -i $PROJ/data_multislice_v3/test/mha/input_nifti/ \
+  -o $PROJ/data_multislice_v3/test/mha/predicted_tumor/
+```
+
+**关键设计决策**: GAN 训练时用 **predicted mask**（不用 GT mask），因为：
+- 推理时只有 predicted mask 可用（没有 GT）
+- 如果训练时用 GT 但推理时用 predicted → 域差距 → 性能下降
+- 让 GAN 学会容忍 tumor seg 的噪声和不准确
+
+### Step 3: Conditional GAN (v32)
+
+修改 GAN 输入为 3 channels：
+
+```python
+# 当前 (v31): input_nc=1
+input = pre_contrast  # [B, 1, H, W]
+
+# 新 (v32): input_nc=3
+input = concat(pre_contrast, breast_mask, predicted_tumor_mask)  # [B, 3, H, W]
+```
+
+模型架构不变（GlobalGenerator），只改第一层 Conv 的 input channels。
+
+**预期效果**:
+- Tumor 区域合成更精准 → SSIM_tumor ↑, Dice ↑
+- 非 tumor 乳腺区域不会被过度增强 → 减少 false positive
+- 结合 per-image norm (v31) → 两者优势叠加
+
+### Docker 容器资源估算
+
+| 模型 | 大小 | 推理时间 |
+|------|------|---------|
+| BreastDivider 2D (Dataset930) | ~120 MB | ~1s |
+| T1w Tumor Seg (Dataset940) | ~120 MB | ~1s |
+| Conditional GAN (v32, ngf=64) | ~730 MB | ~2s |
+| **总计** | **~970 MB** | **~4s** |
+
+远在 10GB 容器 / 10min 推理限制内。
+
+### 风险与对策
+
+| 风险 | 对策 |
+|------|------|
+| T1w tumor seg 精度低 | GAN 训练时用 predicted mask（容忍噪声） |
+| Tumor seg 有 false positive → GAN 在错误位置增强 | breast_mask 约束 + residual mode 限制变化幅度 |
+| 增加推理复杂度 | 总推理时间 ~4s << 10min 限制 |
+| 对无 tumor 的 case 怎么办 | tumor_mask 全 0 → GAN 只靠 breast_mask 合成（退化为 v24） |
+
+### 与已有方案的关系
+
+| 方案 | GAN 输入 | 模型知道 tumor 在哪？ |
+|------|---------|---------------------|
+| v31 (当前最佳) | 1ch: pre | ❌ 全靠自己学 |
+| v24 (mask-as-input) | 2ch: pre + breast_mask | ❌ 只知道乳腺边界 |
+| **v32 (supervisor)** | **3ch: pre + breast + tumor** | **✅ 显式告知** |
