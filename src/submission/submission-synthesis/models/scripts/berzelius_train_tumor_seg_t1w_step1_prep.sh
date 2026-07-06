@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -A berzelius-2026-192
 #SBATCH -p berzelius
-#SBATCH --gpus=0
+#SBATCH --gpus=1
 #SBATCH --cpus-per-task=32
 #SBATCH -t 2:00:00
 #SBATCH -J tumor_seg_prep
