@@ -71,7 +71,7 @@ python train.py \
   --num_D 2 \
   --n_layers_D 3 \
   --breast_mask_dir $PROJ/data_multislice_v3/train/mha/breast_mask \
-  --save_epoch_freq 200 \
+  --save_epoch_freq 50 \
   --print_freq 100 \
   --gpu_ids 0
 
