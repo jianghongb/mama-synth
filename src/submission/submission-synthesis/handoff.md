@@ -2371,3 +2371,78 @@ input = concat(pre_contrast, breast_mask, predicted_tumor_mask)  # [B, 3, H, W]
 | v31 (当前最佳) | 1ch: pre | ❌ 全靠自己学 |
 | v24 (mask-as-input) | 2ch: pre + breast_mask | ❌ 只知道乳腺边界 |
 | **v32 (supervisor)** | **3ch: pre + breast + tumor** | **✅ 显式告知** |
+
+---
+
+## 31. SDEdit Refiner on v31_pinorm (2026-07-06)
+
+### 动机
+
+v31 在 SSIM/Dice 上已超过 GC #1，但 LPIPS (0.117 vs 0.08) 和 MSE (1.24 vs 0.57) 仍有差距。SDEdit diffusion refiner 在 v17 上证明能提升感知质量 (LPIPS -14%) 和分割精度 (Dice +4%)。将同样方法应用到更强的 v31 base 上。
+
+### 方法
+
+在冻结的 v31 GAN 输出上训练轻量 diffusion denoiser：
+- v31 GAN 产生 coarse synthesis
+- 加入 30% noise → DDIM 20 步去噪 → 精修 tumor 边界和纹理
+
+### 训练 Pipeline
+
+```
+pre-contrast
+    │
+    ├─→ per-image normalize → frozen v31 GAN → de-normalize → gan_out
+    │
+    ▼
+gt (ground truth)
+    │
+    ├─→ add noise at timestep t: noisy = √ᾱt·gt + √(1-ᾱt)·ε
+    │
+    ▼
+RefinerUNet([noisy_gt, pre, gan_out], t) → predict ε
+Loss = MSE(ε̂, ε)
+```
+
+### 推理 Pipeline
+
+```
+pre → v31 GAN (pinorm) → gan_out → +30% noise → DDIM 20 steps → refined output
+                                                    ↑
+                                            RefinerUNet([xt, pre, gan_out], t)
+```
+
+推理时间: ~5s/case (GAN 2s + DDIM 3s)，T4 限制内。
+
+### 配置
+
+| 参数 | 值 |
+|------|-----|
+| Base GAN | v31_pinorm (ngf=64, blocks=12, per-image norm) |
+| Refiner | RefinerUNet, 3ch→1ch, base_ch=64, ~18M params |
+| Data | data_multislice_v3/train |
+| Breast mask | ✅ (GAN forward 用 per-image norm) |
+| T (diffusion steps) | 1000 (cosine schedule) |
+| DDIM inference steps | 20 |
+| Noise strength | 0.3 |
+| Epochs | 100 |
+| Batch size | 4 |
+| LR | 1e-4 |
+
+### 文件
+
+| 文件 | 作用 |
+|------|------|
+| `models/train_refiner_v31.py` | 训练脚本（处理 per-image norm） |
+| `models/infer_refiner_v31.py` | 推理脚本（DDIM sampling） |
+| `models/scripts/berzelius_train_refiner_v31.sh` | SLURM 提交脚本 |
+
+### 预期效果
+
+| Metric | v31 (GAN only) | v31 + refiner (预期) | 依据 |
+|--------|:-:|:-:|------|
+| LPIPS ↓ | 0.117 | ~0.100 | v17 refiner 改善 14% |
+| Dice ↑ | 0.539 | ~0.560 | v17 refiner 改善 4% |
+| HD95 ↓ | 125.6 | ~118 | 边界精修 |
+| MSE ↓ | 1.236 | ~1.1 | 去噪平滑 |
+
+### 状态: ⏳ 待 v31 训练完成后提交
