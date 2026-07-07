@@ -95,7 +95,7 @@ python train.py \
   --num_D 2 \
   --n_layers_D 3 \
   --breast_mask_dir $BREAST_MASK \
-  --save_epoch_freq 5 \
+  --save_epoch_freq 50 \
   --print_freq 100 \
   --gpu_ids 0
 
