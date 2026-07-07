@@ -260,3 +260,150 @@ prediction + mask ──┤
 | 增强不够有区分性（全图均匀亮） | AUROC_tumor_ROI ↓ | 差 |
 | radiomics 分布偏移 | FRD ↑ | 差 |
 | 背景有假增强 | MSE ↑, nnUNet 假阳性 → Dice ↓ | 差 |
+
+---
+
+## 🚀 针对各指标的改进策略
+
+### 当前状态 (v31_pinorm, v3 test 299 cases)
+
+| Metric | 当前 | GC #1 | 差距 | 优先级 |
+|--------|:---:|:---:|:---:|:---:|
+| MSE | 1.04 | 0.57 | 1.8x | 🔴 高 |
+| LPIPS | 0.126 | 0.08 | 1.6x | 🔴 高 |
+| SSIM_tumor | 0.476 | 0.43 | ✅ 超过 | 🟢 已满足 |
+| FRD | 24.0 | 25.1 | ✅ 超过 | 🟢 已满足 |
+| AUROC | 0.757 | 0.80 | -5% | 🟡 中 |
+| Dice | 0.539 | 0.48 | ✅ 超过 | 🟢 已满足 |
+| HD95 | 125.6 | 120.6 | ≈ 持平 | 🟡 中 |
+
+---
+
+### 🔴 降低 MSE (1.04 → <0.7)
+
+**根因分析**：
+- Top 10% outlier cases 贡献 42% 总 MSE
+- 这些 cases GT enhancement 极强 (max 24-67)
+- Per-image de-norm 后误差被放大 (乘以 img_std)
+- Median MSE = 0.40（大多数 case 表现好）
+
+**改进方案**:
+
+| # | 方案 | 预期效果 | 代价 | 状态 |
+|---|------|---------|------|------|
+| 1 | **Ensemble 多模型平均** | MSE -30~50% | 推理时间 Nx | 可立即做 |
+| 2 | **ngf=96 + pinorm (v26_pinorm)** | MSE -10~15% | 训练 1x | ⏳ 训练中 |
+| 3 | **Huber loss + GT P99 clip** | MSE -5~10% | 训练 1x | ⏳ 重训中 |
+| 4 | **更深网络 n_blocks=15** | MSE -3~5% | 训练 +10% | ⏳ 训练中 |
+| 5 | **TTA (Test-Time Augmentation)** | MSE -5~10% | 推理 4-8x | 未实现 |
+| 6 | **增大训练数据 (AMBL)** | 减少 outlier | 无额外推理代价 | ✅ 已加入训练 |
+
+**Ensemble 具体做法**:
+```python
+# 最简单：2-3 个模型的输出平均
+output = (pred_v31_pinorm + pred_v22_msv3 + pred_v26_pinorm) / 3
+```
+- 已验证 kfold ensemble MSE 降 76%（0.717 → 0.174）
+- 3 模型推理 ~3x 时间 ≈ 3s（T4 10min 限制内）
+
+---
+
+### 🔴 降低 LPIPS (0.126 → <0.10)
+
+**根因**：LPIPS 由 AlexNet 高级特征决定，需要更精细的纹理/边界。
+
+**改进方案**:
+
+| # | 方案 | 预期效果 | 状态 |
+|---|------|---------|------|
+| 1 | **SDEdit diffusion refiner** | LPIPS -13~15% | 待训练 |
+| 2 | **加大 lambda_vgg (10→20)** | LPIPS -3~5% | ⏳ v22_vgg20 训练中 |
+| 3 | **Ensemble 平均** | LPIPS -5~10% | 可立即做 |
+| 4 | **换 LPIPS 网络 (VGG → SqueezeNet)** | 不确定 | 未实现 |
+
+**SDEdit refiner 最有效**:
+- 在 GAN 输出上加 30% 噪声 → 20 步 DDIM 去噪 → 精修 tumor 边界和纹理
+- v17 验证：LPIPS 从 0.126 降到 0.109 (-13%)
+- 推理额外 +5s/case（仍在限制内）
+
+---
+
+### 🟡 提升 AUROC Contrast (0.757 → 0.80)
+
+**根因**：tumor ROI 内增强信号不够强/不够逼真。
+
+**改进方案**:
+
+| # | 方案 | 做法 | 预期 |
+|---|------|------|------|
+| 1 | 加大 tumor_weight | `--tumor_weight 20`（当前 10） | 强制 tumor 区域精确重建 |
+| 2 | 加强 MSSC loss | `--lambda_mssc 100`（当前 50） | 增强 subtraction consistency |
+| 3 | 加入 SSIM loss | `--lambda_ssim 5 --lambda_vgg 5` | 保留 tumor 结构细节 |
+| 4 | 不做 GT clip | 去掉 P99 clip | 保留 tumor 强增强信号 |
+| 5 | 只用 v3 数据训练 | GT 统一 peak phase | GT 一致 → 增强更强 |
+
+**关键发现**：v31b_v3 (GT P95 clip) AUROC=0.545 崩溃证明 GT clip 太激进会截断 tumor 信号。
+修复后 (P99) 预期 AUROC 恢复到 ~0.70-0.75。
+
+---
+
+### 🟡 降低 HD95 (125.6 → <120)
+
+**根因**：nnUNet 分割的 tumor 边界偏差。
+
+**改进方案**:
+
+| # | 方案 | 预期效果 | 状态 |
+|---|------|---------|------|
+| 1 | **SDEdit refiner** | HD95 -9% (v17 验证) | 待训练 |
+| 2 | **更深网络 (n_blocks=15)** | 更大感受野 → 更好 tumor 边界 | ⏳ 训练中 |
+| 3 | **Ensemble** | 边界平滑，减少分割噪声 | 可立即做 |
+| 4 | **训练时加 edge loss** | 显式惩罚边界模糊 | 未实现 |
+
+---
+
+### 🟢 保持已超过的指标 (SSIM, FRD, Dice)
+
+这三个指标已超过 GC #1。风险：新改进可能 trade-off 伤害它们。
+
+**保护策略**:
+- 不要做太激进的 GT clip（伤害 SSIM/Dice）
+- 保持 per-image norm（核心贡献）
+- Ensemble 通常不会降低这些指标（只会更好）
+- 监控 AUROC：如果 AUROC < 0.7 说明增强太弱
+
+---
+
+## 📋 综合改进路线图
+
+### 第一阶段：不需要新训练（立即可做）
+
+| 方案 | 做法 | 影响指标 |
+|------|------|---------|
+| **Ensemble** | v31_pinorm + v22_msv3 + v26_msv3 平均 | MSE ↓↓, LPIPS ↓, HD95 ↓ |
+| **TTA** | 水平翻转推理取平均 | MSE ↓, LPIPS ↓ |
+
+### 第二阶段：正在训练
+
+| 模型 | 预期最强指标 | 完成时间 |
+|------|------------|---------|
+| v26_pinorm (ngf=96 + pinorm) | MSE 最低 | ~18h |
+| v31_deeper (n_blocks=15) | HD95/Dice 改善 | ~20h |
+| v31b_v3 (huber + P99 clip) | MSE + 均衡 | ~18h |
+
+### 第三阶段：需要新训练
+
+| 方案 | 目标 | 预期效果 |
+|------|------|---------|
+| SDEdit on v31_pinorm | LPIPS, HD95 | LPIPS -15%, HD95 -9% |
+| v26_pinorm + SDEdit | 全面最强单模型 | 接近 GC #1 |
+| Final ensemble | 提交用 | MSE -40%, 冲 GC #1 |
+
+### 最终提交策略
+
+```
+Best single model: v26_pinorm (预期)
+Best ensemble:     v31_pinorm + v26_pinorm + v31_deeper (3 models)
+Docker size:       3 × 700MB weights = 2.1GB + nnUNet 1.6GB + base = ~5GB (< 10GB)
+Inference time:    3 × 1s + breast_seg 1s = ~4s (< 10min)
+```
