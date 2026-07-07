@@ -2,7 +2,7 @@
 #SBATCH -A berzelius-2026-192
 #SBATCH -p berzelius
 #SBATCH --gpus=1
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=8
 #SBATCH -t 4:00:00
 #SBATCH -J tumor_seg_infer
 #SBATCH -o /proj/berzbiomedicalimagingkth/users/x_honji/tumor_seg_infer_%j.log
@@ -11,11 +11,14 @@
 #SBATCH --mail-user=hongjia@kth.se
 #
 # Step 2: Generate predicted tumor masks using trained Dataset940 model.
-# Runs inference on BOTH train and test sets.
-# Output: predicted_tumor/ directory in each split.
+# Supports parallel execution: pass SPLIT=train or SPLIT=test
 #
-# The predicted masks will be used as input channel for the conditional GAN (v32).
-# Important: GAN trains with PREDICTED masks (not GT), matching inference conditions.
+# Usage:
+#   sbatch --export=SPLIT=train berzelius_tumor_seg_infer.sh
+#   sbatch --export=SPLIT=test berzelius_tumor_seg_infer.sh
+#   (or without SPLIT to process both sequentially)
+#
+# Supports resume: skips already-generated masks.
 
 PROJ=/proj/berzbiomedicalimagingkth/users/x_honji
 
@@ -29,24 +32,20 @@ export nnUNet_results=$PROJ/nnUNet_results
 export TORCHDYNAMO_DISABLE=1
 
 MODEL_DIR=$nnUNet_results/Dataset940_TumorSegT1w/nnUNetTrainer__nnUNetPlans__2d
-DATASET_ID=940
 
-echo "=== Generating predicted tumor masks ==="
+# Determine which splits to process
+SPLIT=${SPLIT:-all}
+echo "=== Tumor Seg Inference (split=$SPLIT) ==="
 echo "Model: $MODEL_DIR/fold_0"
 echo ""
-
-# We need to convert MHA → NIfTI for nnUNet predict, then convert results back to MHA.
-# Use a temp dir for NIfTI conversion, then convert predictions back.
 
 python -c "
 import os, sys
 import numpy as np
-import nibabel as nib
 import SimpleITK as sitk
+import torch
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
-import subprocess, tempfile, shutil
 
 os.environ['nnUNet_raw'] = '$PROJ/nnUNet_raw'
 os.environ['nnUNet_preprocessed'] = '$PROJ/nnUNet_preprocessed'
@@ -54,7 +53,6 @@ os.environ['nnUNet_results'] = '$PROJ/nnUNet_results'
 os.environ['TORCHDYNAMO_DISABLE'] = '1'
 
 from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
-import torch
 
 device = torch.device('cuda')
 predictor = nnUNetPredictor(
@@ -73,67 +71,53 @@ props = {
 }
 
 def predict_and_save(input_dir, output_dir):
-    '''Run tumor seg on all MHA files in input_dir, save binary masks to output_dir.'''
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     files = sorted(input_dir.glob('*.mha'))
-    print(f'  Processing {len(files)} files → {output_dir}')
+    todo = [f for f in files if not (output_dir / f.name).exists()]
+    print(f'  {input_dir.parent.parent.name}: {len(files)} total, {len(files)-len(todo)} done, {len(todo)} to process')
 
-    done = 0
-    for f in tqdm(files):
-        out_path = output_dir / f.name
-        if out_path.exists():
-            done += 1
-            continue
-
-        # Read MHA
+    for f in tqdm(todo, desc=input_dir.parent.parent.name):
         img = sitk.ReadImage(str(f))
         arr = sitk.GetArrayFromImage(img).astype(np.float32).squeeze()
 
-        # Predict
-        input_arr = arr[np.newaxis, np.newaxis, :, :]  # (1, 1, H, W)
+        input_arr = arr[np.newaxis, np.newaxis, :, :]
         pred = predictor.predict_single_npy_array(input_arr, props, None, None, False)
         while pred.ndim > 2:
             pred = pred[0]
 
-        # Binary tumor mask
         tumor_mask = (pred > 0).astype(np.int16)
-
-        # Save as MHA with same metadata
         if sitk.GetArrayFromImage(img).ndim == 3:
             tumor_mask = tumor_mask[np.newaxis, ...]
         out_img = sitk.GetImageFromArray(tumor_mask)
         out_img.CopyInformation(img)
-        sitk.WriteImage(out_img, str(out_path))
-        done += 1
+        sitk.WriteImage(out_img, str(output_dir / f.name))
 
-    print(f'  Done: {done} masks saved')
+    print(f'  Done: {len(files)} total masks in {output_dir}')
 
-# Process train set
-print('=== Train set ===')
-predict_and_save(
-    '$PROJ/data_multislice_v3/train/mha/input',
-    '$PROJ/data_multislice_v3/train/mha/predicted_tumor'
-)
+split = '$SPLIT'
+if split in ('train', 'all'):
+    print('=== Train set ===')
+    predict_and_save(
+        '$PROJ/data_multislice_v3/train/mha/input',
+        '$PROJ/data_multislice_v3/train/mha/predicted_tumor'
+    )
 
-# Process test set
+if split in ('test', 'all'):
+    print('')
+    print('=== Test set ===')
+    predict_and_save(
+        '$PROJ/data_multislice_v3/test/mha/input',
+        '$PROJ/data_multislice_v3/test/mha/predicted_tumor'
+    )
+
 print('')
-print('=== Test set ===')
-predict_and_save(
-    '$PROJ/data_multislice_v3/test/mha/input',
-    '$PROJ/data_multislice_v3/test/mha/predicted_tumor'
-)
-
-print('')
-print('All done!')
+print('Done!')
 "
 
 echo ""
-echo "=== Complete ==="
-echo "Train masks: $(ls $PROJ/data_multislice_v3/train/mha/predicted_tumor/ 2>/dev/null | wc -l) files"
-echo "Test masks:  $(ls $PROJ/data_multislice_v3/test/mha/predicted_tumor/ 2>/dev/null | wc -l) files"
-echo ""
-echo "Next: Train conditional GAN (v32) with 3-channel input"
-echo "  sbatch berzelius_train_v32_conditional.sh"
+echo "=== Complete (split=$SPLIT) ==="
+echo "Train masks: $(ls $PROJ/data_multislice_v3/train/mha/predicted_tumor/ 2>/dev/null | wc -l)"
+echo "Test masks:  $(ls $PROJ/data_multislice_v3/test/mha/predicted_tumor/ 2>/dev/null | wc -l)"
