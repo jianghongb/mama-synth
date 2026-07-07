@@ -46,7 +46,28 @@ echo "=== Dataset940_TumorSegT1w: $NUM_IMAGES training images ==="
 
 echo ""
 echo "=== Plan + Preprocess ==="
+# Keep GPU warm during CPU-heavy preprocessing to avoid low-power termination
+python -c "
+import torch, time, threading
+def gpu_keepalive():
+    '''Run dummy GPU computation to keep power > 90W'''
+    device = torch.device('cuda')
+    x = torch.randn(1024, 1024, device=device)
+    while not stop_event.is_set():
+        _ = torch.mm(x, x)
+        time.sleep(0.5)
+stop_event = threading.Event()
+t = threading.Thread(target=gpu_keepalive, daemon=True)
+t.start()
+print('GPU keepalive started')
+" &
+KEEPALIVE_PID=$!
+
 nnUNetv2_plan_and_preprocess -d $DATASET_ID -c 2d --verify_dataset_integrity
+
+# Stop keepalive
+kill $KEEPALIVE_PID 2>/dev/null
+echo "GPU keepalive stopped, starting training..."
 
 echo ""
 echo "=== Training fold 0 (2D) ==="

@@ -34,6 +34,17 @@ MASK_DIR=$PROJ/data_multislice_v3/train/mha/mask
 
 echo "=== Step 1: Convert MHA → nnUNet format (32 threads) ==="
 
+# Keep GPU warm during CPU-heavy data conversion to avoid low-power termination (Berzelius policy: >90W)
+python -c "
+import torch, time
+device = torch.device('cuda')
+x = torch.randn(2048, 2048, device=device)
+while True:
+    _ = torch.mm(x, x)
+    time.sleep(0.3)
+" &
+KEEPALIVE_PID=$!
+
 python -c "
 import json, os, sys
 import numpy as np
@@ -126,5 +137,6 @@ print(f'Output: {DATASET_DIR}')
 
 echo ""
 echo "=== Step 1 complete ==="
+kill $KEEPALIVE_PID 2>/dev/null
 echo "Now submit GPU training job:"
 echo "  sbatch src/submission/submission-synthesis/models/scripts/berzelius_train_tumor_seg_t1w_step2.sh"
