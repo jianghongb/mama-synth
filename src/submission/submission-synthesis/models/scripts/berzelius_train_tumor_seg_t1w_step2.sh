@@ -28,6 +28,9 @@ export nnUNet_raw=$PROJ/nnUNet_raw
 export nnUNet_preprocessed=$PROJ/nnUNet_preprocessed
 export nnUNet_results=$PROJ/nnUNet_results
 
+# Disable torch.compile — Berzelius GCC wrapper incompatible with Inductor/Triton
+export TORCHDYNAMO_DISABLE=1
+
 # Maximize GPU utilization
 export nnUNet_n_proc_DA=16          # data augmentation workers
 export nnUNet_def_n_proc=16         # preprocessing workers
