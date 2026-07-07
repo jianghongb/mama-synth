@@ -82,6 +82,7 @@ class BaseOptions():
         self.parser.add_argument('--spatial_weight', action='store_true', help='use spatial weighting (bg/breast/tumor) instead of binary breast mask')
         self.parser.add_argument('--sw_breast', type=float, default=5.0, help='spatial weight for breast region')
         self.parser.add_argument('--sw_tumor', type=float, default=50.0, help='spatial weight for tumor region')
+        self.parser.add_argument('--vflip', action='store_true', help='enable random vertical flip augmentation (50%% probability, independent of hflip)')
         self.parser.add_argument('--intensity_aug', action='store_true', help='random intensity scale/bias augmentation for generalization')
         self.parser.add_argument('--noise_aug', action='store_true', help='Gaussian noise on input (σ=0.02-0.05) and GT jitter (σ=0.02-0.08)')
         self.parser.add_argument('--huber_loss', action='store_true', help='Use Huber (SmoothL1) loss instead of L1 — robust to outlier pixels')

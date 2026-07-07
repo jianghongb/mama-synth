@@ -114,6 +114,13 @@ class MhaPerImageNormDataset(BaseDataset):
             mask_t = mask_t.flip(-1)
             breast_mask_t = breast_mask_t.flip(-1)
 
+        # Random vertical flip
+        if self.opt.isTrain and getattr(self.opt, 'vflip', False) and torch.rand(1).item() > 0.5:
+            input_t = input_t.flip(-2)
+            gt_t = gt_t.flip(-2)
+            mask_t = mask_t.flip(-2)
+            breast_mask_t = breast_mask_t.flip(-2)
+
         # Intensity augmentation (scale only, no bias — preserves normalization semantics)
         if self.opt.isTrain and getattr(self.opt, 'intensity_aug', False):
             scale = 0.8 + torch.rand(1).item() * 0.4  # [0.8, 1.2] — narrower range
