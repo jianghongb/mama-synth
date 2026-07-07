@@ -11,14 +11,21 @@
 #SBATCH --mail-user=hongjia@kth.se
 #
 # Step 2: Generate predicted tumor masks using trained Dataset940 model.
-# Supports parallel execution: pass SPLIT=train or SPLIT=test
+# Supports parallel execution by data source.
 #
 # Usage:
-#   sbatch --export=SPLIT=train berzelius_tumor_seg_infer.sh
-#   sbatch --export=SPLIT=test berzelius_tumor_seg_infer.sh
-#   (or without SPLIT to process both sequentially)
+#   # All data (sequential):
+#   sbatch berzelius_tumor_seg_infer.sh
 #
-# Supports resume: skips already-generated masks.
+#   # Parallel by data source (submit multiple jobs):
+#   sbatch --export=SOURCE=DUKE berzelius_tumor_seg_infer.sh
+#   sbatch --export=SOURCE=ISPY2 berzelius_tumor_seg_infer.sh
+#   sbatch --export=SOURCE=AMBL berzelius_tumor_seg_infer.sh
+#   sbatch --export=SOURCE=LAB berzelius_tumor_seg_infer.sh
+#   sbatch --export=SOURCE=YUNNAN berzelius_tumor_seg_infer.sh
+#   sbatch --export=SOURCE=NACT berzelius_tumor_seg_infer.sh
+#
+# All modes support resume: skips already-generated masks.
 
 PROJ=/proj/berzbiomedicalimagingkth/users/x_honji
 
@@ -35,7 +42,8 @@ MODEL_DIR=$nnUNet_results/Dataset940_TumorSegT1w/nnUNetTrainer__nnUNetPlans__2d
 
 # Determine which splits to process
 SPLIT=${SPLIT:-all}
-echo "=== Tumor Seg Inference (split=$SPLIT) ==="
+SOURCE=${SOURCE:-all}
+echo "=== Tumor Seg Inference (split=$SPLIT, source=$SOURCE) ==="
 echo "Model: $MODEL_DIR/fold_0"
 echo ""
 
@@ -70,16 +78,24 @@ props = {
     'spacing': [1., 1., 1.],
 }
 
+source_filter = '$SOURCE'
+
 def predict_and_save(input_dir, output_dir):
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     files = sorted(input_dir.glob('*.mha'))
+
+    # Filter by source prefix if specified
+    if source_filter != 'all':
+        files = [f for f in files if f.name.startswith(source_filter)]
+        print(f'  Filtered to source={source_filter}: {len(files)} files')
+
     todo = [f for f in files if not (output_dir / f.name).exists()]
     print(f'  {input_dir.parent.parent.name}: {len(files)} total, {len(files)-len(todo)} done, {len(todo)} to process')
 
-    for f in tqdm(todo, desc=input_dir.parent.parent.name):
+    for f in tqdm(todo, desc=f'{source_filter}'):
         img = sitk.ReadImage(str(f))
         arr = sitk.GetArrayFromImage(img).astype(np.float32).squeeze()
 
@@ -95,7 +111,7 @@ def predict_and_save(input_dir, output_dir):
         out_img.CopyInformation(img)
         sitk.WriteImage(out_img, str(output_dir / f.name))
 
-    print(f'  Done: {len(files)} total masks in {output_dir}')
+    print(f'  Done.')
 
 split = '$SPLIT'
 if split in ('train', 'all'):
@@ -118,6 +134,6 @@ print('Done!')
 "
 
 echo ""
-echo "=== Complete (split=$SPLIT) ==="
+echo "=== Complete (split=$SPLIT, source=$SOURCE) ==="
 echo "Train masks: $(ls $PROJ/data_multislice_v3/train/mha/predicted_tumor/ 2>/dev/null | wc -l)"
 echo "Test masks:  $(ls $PROJ/data_multislice_v3/test/mha/predicted_tumor/ 2>/dev/null | wc -l)"
