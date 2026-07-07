@@ -32,6 +32,9 @@ class MhaPerImageNormDataset(BaseDataset):
         self.dir_gt = os.path.join(opt.dataroot, 'mha', 'ground_truth')
         self.dir_mask = os.path.join(opt.dataroot, 'mha', 'mask')
         self.dir_breast_mask = getattr(opt, 'breast_mask_dir', '') or ''
+        self.dir_tumor_mask = getattr(opt, 'tumor_mask_dir', '') or ''
+        self.tumor_mask_as_input = getattr(opt, 'tumor_mask_as_input', False)
+        self.mask_as_input = getattr(opt, 'mask_as_input', False)
 
         all_files = sorted([
             f for f in os.listdir(self.dir_input) if f.endswith('.mha')
@@ -127,8 +130,33 @@ class MhaPerImageNormDataset(BaseDataset):
             input_t = input_t * scale
             gt_t = gt_t * scale
 
+        # Load predicted tumor mask (for conditional GAN input)
+        tumor_mask_t = torch.zeros_like(input_t)
+        if self.dir_tumor_mask and os.path.exists(os.path.join(self.dir_tumor_mask, fname)):
+            tm_arr = sitk.GetArrayFromImage(
+                sitk.ReadImage(os.path.join(self.dir_tumor_mask, fname))
+            ).astype(np.float32).squeeze()
+            tm_arr = (tm_arr > 0).astype(np.float32)
+            tumor_mask_t = torch.from_numpy(tm_arr).unsqueeze(0)
+            if self.fixed_size:
+                s = self.target_size
+                tumor_mask_t = F.interpolate(tumor_mask_t.unsqueeze(0), size=(s, s), mode='nearest').squeeze(0)
+            else:
+                tumor_mask_t = self._pad_tensor(tumor_mask_t)
+
+        # Build label tensor (GAN input)
+        if self.mask_as_input and self.tumor_mask_as_input:
+            # 3ch: pre + breast_mask + tumor_mask
+            label_t = torch.cat([input_t, breast_mask_t, tumor_mask_t], dim=0)
+        elif self.mask_as_input:
+            # 2ch: pre + breast_mask
+            label_t = torch.cat([input_t, breast_mask_t], dim=0)
+        else:
+            # 1ch: pre only
+            label_t = input_t
+
         return {
-            'label': input_t,
+            'label': label_t,
             'inst': torch.zeros(1),
             'image': gt_t,
             'feat': torch.zeros(1),

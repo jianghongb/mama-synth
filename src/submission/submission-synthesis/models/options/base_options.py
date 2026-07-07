@@ -79,6 +79,8 @@ class BaseOptions():
         self.parser.add_argument('--breast_mask_thresh', type=float, default=-0.3, help='z-score threshold for breast tissue')
         self.parser.add_argument('--breast_mask_dir', type=str, default='', help='path to precomputed breast masks from nnUNet (overrides threshold method)')
         self.parser.add_argument('--mask_as_input', action='store_true', help='concatenate breast mask as 2nd input channel to generator')
+        self.parser.add_argument('--tumor_mask_as_input', action='store_true', help='concatenate predicted tumor mask as additional input channel')
+        self.parser.add_argument('--tumor_mask_dir', type=str, default='', help='path to predicted tumor masks from T1w tumor seg model')
         self.parser.add_argument('--spatial_weight', action='store_true', help='use spatial weighting (bg/breast/tumor) instead of binary breast mask')
         self.parser.add_argument('--sw_breast', type=float, default=5.0, help='spatial weight for breast region')
         self.parser.add_argument('--sw_tumor', type=float, default=50.0, help='spatial weight for tumor region')
