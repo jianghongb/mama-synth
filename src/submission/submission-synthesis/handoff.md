@@ -2075,6 +2075,19 @@ input (global z-score) → breast mask → per-image mean/std
 
 **状态**: ✅ 完成 — 不采用
 
+**更新 (2026-07-08)**: v31b_v3 resume 训完 200 epochs 后重新评估：
+
+| Metric | v31_pinorm (200ep) | v31b_v3 (200ep, resume) | 变化 |
+|--------|:---:|:---:|------|
+| MSE ↓ | 1.236 | **1.221** | ✅ -1% |
+| LPIPS ↓ | **0.117** | 0.117 | 持平 |
+| SSIM_tumor ↑ | **0.476** | 0.473 | 持平 |
+| FRD ↓ | 28.45 | **28.34** | 持平 |
+| Dice ↑ | **0.539** | 0.537 | 持平 |
+| HD95 ↓ | **125.6** | 135.4 | ❌ +8% |
+
+训完整 200 epochs 后 Huber loss + GT clipping 与 v31_pinorm 性能等价 — 之前 v31b_huber 的崩溃是因为只跑到 ~110 epoch 的中间 checkpoint 不稳定。Huber loss 是中性改动，不提供额外收益。**v31_pinorm 仍为最佳。**
+
 ---
 
 ## 30c. v31_msv2: Per-Image Norm on data_multislice_v2 (2026-07-06)
@@ -2445,4 +2458,22 @@ pre → v31 GAN (pinorm) → gan_out → +30% noise → DDIM 20 steps → refine
 | HD95 ↓ | 125.6 | ~118 | 边界精修 |
 | MSE ↓ | 1.236 | ~1.1 | 去噪平滑 |
 
-### 状态: ⏳ 待 v31 训练完成后提交
+### 状态: ❌ 失败 — 不采用
+
+### 实际结果 (data_multislice_v3 test, 299 cases)
+
+| Metric | v31 (GAN only) | v31 + Refiner | 变化 |
+|--------|:---:|:---:|:---:|
+| MSE ↓ | **1.236** | 3.202 | ❌ +159% |
+| LPIPS ↓ | **0.117** | 0.275 | ❌ +135% |
+| SSIM_tumor ↑ | **0.476** | 0.473 | ≈ 持平 |
+| FRD ↓ | 28.45 | **28.22** | ✅ 微弱 |
+| Dice ↑ | **0.539** | 0.513 | ❌ -5% |
+| HD95 ↓ | **125.6** | 136.3 | ❌ +8% |
+
+**失败原因分析**：
+1. Per-image normalization 和 diffusion noise schedule 不兼容 — GAN output 经过 de-normalize 后 intensity range 因 case 而异，但 diffusion 的 noise scale 是固定的
+2. Noise strength=0.3 可能太大，破坏了 v31 原本好的结果
+3. v17 refiner 成功是因为 v14 GAN 用 global z-score（noise scale 一致），v31 用 per-image norm 导致域不匹配
+
+**结论**：SDEdit refiner 不适合 per-image normalized GAN。v31 直接用不加 refiner。
