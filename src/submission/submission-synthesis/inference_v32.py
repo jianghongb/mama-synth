@@ -167,13 +167,19 @@ def main():
         mu, sigma = 0.0, 1.0
     sl_norm = (sl - mu) / sigma * breast_mask
 
-    # Step 4: Build 3-channel input and run GAN
+    # Step 4: Build 3-channel input and run GAN (with hflip TTA)
     input_3ch = np.stack([sl_norm, breast_mask, tumor_mask], axis=0)  # (3, H, W)
     t = torch.from_numpy(input_3ch).unsqueeze(0).float().to(device)  # (1, 3, H, W)
     t = F.interpolate(t, size=(MODEL_SIZE, MODEL_SIZE), mode="bilinear", align_corners=False)
 
     with torch.no_grad():
-        out_norm = netG(t)
+        # Forward pass
+        out_norm_1 = netG(t)
+        # Horizontal flip TTA
+        t_flip = t.flip(-1)
+        out_norm_2 = netG(t_flip).flip(-1)
+        # Average
+        out_norm = (out_norm_1 + out_norm_2) / 2.0
 
     # Step 5: De-normalize
     result_norm = F.interpolate(out_norm, size=(orig_h, orig_w), mode="bilinear", align_corners=False)
