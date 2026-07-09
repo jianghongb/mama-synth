@@ -179,8 +179,11 @@ def main():
     result_norm = F.interpolate(out_norm, size=(orig_h, orig_w), mode="bilinear", align_corners=False)
     synthetic = result_norm[0, 0].cpu().numpy() * sigma + mu
 
-    # Step 6: Breast mask composite
-    result = breast_mask * synthetic + (1 - breast_mask) * sl
+    # Step 6: Breast mask composite (Gaussian blur for smooth boundary)
+    from scipy.ndimage import gaussian_filter
+    soft_mask = gaussian_filter(breast_mask, sigma=5.0)
+    soft_mask = np.clip(soft_mask, 0, 1)
+    result = soft_mask * synthetic + (1 - soft_mask) * sl
 
     # Write output
     if arr.ndim == 3:
