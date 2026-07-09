@@ -2782,3 +2782,87 @@ Input → BreastDivider → breast_mask
 ```
 
 推理时间: ~8s/case (T4 GPU), 远在 10min 限制内。
+
+---
+
+## 34. MSE 根因分析与改进方案 (2026-07-09)
+
+### 发现
+
+v32 final 的 MSE (1.127) 主要来自 **breast mask composite 的副作用**，而不是 GAN 合成质量差。
+
+| Case | MSE total | MSE breast (GAN 质量) | MSE outside (composite 误差) |
+|------|:-:|:-:|:-:|
+| ISPY2_111344 | 5.12 | **1.36** (合理) | **6.93** ❌ (巨大) |
+| DUKE_244 | 5.78 | 4.16 | **5.94** ❌ |
+| Good case (median) | 0.41 | ~0.3 | ~0.1 |
+
+### 根因
+
+```
+GT (post-contrast) 在乳腺外 ≠ pre-contrast input
+
+原因: DCE-MRI 造影剂不只增强 tumor，全身组织都有轻微增强
+  - 胸壁肌肉、血管、淋巴结都会摄取造影剂
+  - GT 乳腺外 mean = 1.94, input 乳腺外 mean = 0.62 (差距 1.3!)
+
+我们的 composite: output_outside = pre-contrast (不变)
+但 GT 期望:     output_outside = pre-contrast + 全身轻微增强
+→ MSE 在乳腺外区域爆炸
+```
+
+### Case-level 统计
+
+- MSE median = 0.406（很好），mean = 1.127（被 outliers 拉高）
+- Top 10% outliers 贡献了 MSE 的 35%
+- 13% cases MSE > 3.0，主要是 breast mask 小（DUKE_244 breast 只占 9%）或 GT 增强信号强的 case
+
+### 改进方案
+
+| 方案 | 做法 | 预期 MSE | 风险 |
+|------|------|---------|------|
+| **A: 去掉 composite** | GAN 直接输出全图 | ~0.8-0.9 | HD95 可能退步（胸壁 noise） |
+| **B: 增大 blur sigma** | sigma 5→20，覆盖更多过渡区 | ~1.0 | 效果有限 |
+| **C: 全图 GAN + soft attenuation** | GAN 合成全图，soft mask 控制强度 | ~0.8 | 需调参 |
+| **D: 训练时不 mask GT 乳腺外** | 让 GAN 学习全身轻微增强 | ~0.7 | 需重训 |
+| **E: 两阶段 composite** | breast 内用 GAN，breast 外用 input + learned offset | ~0.8 | 复杂 |
+
+### 方案 A 详细说明（最快验证）
+
+```python
+# 当前:
+result = soft_mask * synthetic + (1 - soft_mask) * pre  # 乳腺外 = pre
+
+# 方案 A: 不做 composite
+result = synthetic  # GAN 直接输出全图（residual mode: pre + delta）
+```
+
+GAN 的 residual mode (`output = input + delta`) 在乳腺外应该自动学到接近 0 的 delta，
+但因为训练时有 breast mask loss masking，乳腺外的 delta 可能不够准确。
+
+### 方案 D 详细说明（最彻底，需重训）
+
+修改训练逻辑：
+```python
+# 当前训练: loss 只在 breast 内计算
+loss = L1(output * breast_mask, gt * breast_mask)
+
+# 方案 D: 全图 loss，但 breast 内权重更高
+loss = L1(output, gt) + tumor_weight * L1(output * tumor_mask, gt * tumor_mask)
+# 去掉 breast_mask masking，让模型学全身增强
+```
+
+### 决策
+
+- 短期（提交用）: 先试方案 A，如果 HD95 没退步太多就用
+- 中期: 方案 D 重训 v32b（全图 loss），预期 MSE 大幅下降
+
+### 与 GC #1 差距的重新理解
+
+GC #1 的 MSE=0.57 很可能是因为他们：
+1. 没有做 breast mask composite（直接输出全图）
+2. 或者用了更大范围的 soft mask
+3. 模型自然学到了全身轻微增强
+
+我们的 composite 虽然帮助了 Dice/HD95（tumor 边界更清晰），但严重伤害了 MSE。
+这是一个 **Dice vs MSE 的 trade-off**。
