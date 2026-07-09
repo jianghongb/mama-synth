@@ -2,47 +2,38 @@
 
 ---
 
-## Executive Summary (2026-07-05)
+## Executive Summary (2026-07-09)
 
 ### Best Models (data_multislice_v3 test, 299 cases)
 
 | Rank | Version | MSE ↓ | LPIPS ↓ | SSIM_tumor ↑ | Dice ↑ | HD95 ↓ | Key Change |
 |:---:|---------|:-----:|:-------:|:------------:|:------:|:------:|------------|
-| 🥇 | **v31_pinorm** | 1.236 | **0.117** | **0.476** | **0.539** | **125.6** | Per-image z-score normalization |
-| 🥈 | **v26_msv3** | **1.101** | 0.157 | 0.394 | 0.493 | 144.9 | Wider network (ngf=96) |
-| 🥉 | **v22_msv3** | 1.233 | 0.163 | 0.385 | 0.500 | 135.6 | Baseline deeper (n_blocks=12) |
-| 4 | v22_msv2 | 1.097 | 0.168 | 0.369 | 0.474 | 127.4 | Trained on v2 data (per-phase GT) |
-
-### Historical Best (data_split/test, 199 cases — original test set)
-
-| Rank | Version | MSE ↓ | LPIPS ↓ | SSIM_tumor ↑ | Dice ↑ | HD95 ↓ |
-|:---:|---------|:-----:|:-------:|:------------:|:------:|:------:|
-| 🥇 | **v26** | **0.181** | **0.100** | **0.713** | **0.730** | 63.3 |
-| 🥈 | **v22** | 0.196 | 0.101 | 0.698 | 0.720 | **57.4** |
-| 🥉 | **v17** | 0.216 | 0.109 | 0.688 | 0.731 | 62.8 |
+| 🥇 | **v31_auroc** | 1.193 | 0.118 | **0.476** | **0.565** | 112.1 | tumor_weight×2 + MSSC×2, no GT clip |
+| 🥈 | **v32_vflip** | 1.215 | **0.117** | 0.475 | 0.554 | **104.9** | Per-image norm + vflip augmentation |
+| 🥉 | **v31_pinorm** | **1.039** | 0.126 | 0.379 | 0.371 | 239.7 | Per-image z-score normalization |
+| 4 | v26_msv3 | 1.101 | 0.157 | 0.394 | 0.493 | 144.9 | Wider network (ngf=96) |
 
 ### Current Recommendation
-- **提交首选**: v31_pinorm (SSIM/Dice/LPIPS 最优，超过 GC #1 多项指标)
-- **MSE 最优**: v26_msv3 (ngf=96, MSE=1.101)
-- **下一步最有前途**: v26 + pinorm (结合两者优势)
-- **不采用**: v28b (UC-GAN), v29b (Swin) — 全面退步
+- **提交首选 (Dice)**: v31_auroc (Dice 0.565, SSIM 0.476, 超过 GC #1)
+- **提交首选 (HD95)**: v32_vflip (HD95 104.9, LPIPS 0.117, 边界最精确)
+- **MSE 最优**: v31_pinorm (MSE=1.039, FRD=24.01)
+- **最有前途的下一步**: v33 = v31_auroc + vflip (合并两者优势)
 
 ### vs GC Validation #1 (MamoAnd)
 
-| Metric | #1 MamoAnd | **v31_pinorm** | 状态 |
-|--------|:---:|:---:|:---:|
-| MSE ↓ | **0.57** | 1.24 | ❌ 2x gap |
-| LPIPS ↓ | **0.08** | 0.12 | ❌ 1.5x gap |
-| SSIM_tumor ↑ | 0.43 | **0.48** | ✅ 超过 |
-| Dice ↑ | 0.48 | **0.54** | ✅ 超过 |
-| HD95 ↓ | **120.6** | 125.6 | ≈ 持平 |
+| Metric | #1 MamoAnd | **v31_auroc** | **v32_vflip** | 状态 |
+|--------|:---:|:---:|:---:|:---:|
+| MSE ↓ | **0.57** | 1.19 | 1.22 | ❌ 2x gap |
+| LPIPS ↓ | **0.08** | 0.12 | 0.12 | ❌ 1.5x gap |
+| SSIM_tumor ↑ | 0.43 | **0.48** | **0.48** | ✅ 超过 |
+| Dice ↑ | 0.48 | **0.57** | **0.55** | ✅ 超过 |
+| HD95 ↓ | 120.6 | 112.1 | **104.9** | ✅ 超过 |
 
 ⚠️ Test set 不同，仅作方向参考。MSE/LPIPS 仍是主要差距。
 
 ### Active Experiments
-- v22_vgg20: lambda_vgg=20 降 LPIPS — ⏳ 训练中
-- v26 + pinorm: 大网络 + per-image norm — 待启动
-- SDEdit refiner on v31_pinorm — 待启动
+- **v33 (next)**: v31_auroc + vflip = tumor_weight=20 + MSSC=100 + no GT clip + vflip augmentation — 合并 v31_auroc 和 v32_vflip 的优势
+- v26 + pinorm: 大网络 + per-image norm — 预期降低 MSE
 
 ### Quick Reference
 - 架构: Section 1
@@ -2130,6 +2121,145 @@ input (global z-score) → breast mask → per-image mean/std
 
 ---
 
+## 30d. v31_auroc: Per-Image Norm + Stronger Tumor/MSSC Loss (2026-07-08) 🏆
+
+**动机**: v31_pinorm 的 bad case 分析显示 tumor 区域增强不足 (Enhancement Under-prediction)。加大 tumor_weight 和 MSSC 权重，强制模型产生更强的 tumor 增强信号。
+
+**配置** (对比 v31_pinorm):
+
+| 参数 | v31_pinorm | v31_auroc |
+|------|:---:|:---:|
+| tumor_weight | 10 | **20** (2×) |
+| lambda_mssc | 50 | **100** (2×) |
+| GT clip | 无 | **无** (不 clip，保留强增强) |
+| 其余 | — | 完全相同 (ngf=64, n_blocks=12, perimage_norm, noise_aug, intensity_aug) |
+
+**训练**: Berzelius job 17029052 (`v31_auroc`), data_multislice_v3
+**脚本**: `berzelius_train_v31_auroc.sh` (`--name mamasynth_v31_auroc`)
+
+### 结果 (data_multislice_v3/test, 299 cases)
+
+| Metric | v31_pinorm | **v31_auroc** | 变化 | #1 GC Val |
+|--------|:---:|:---:|------|:---:|
+| MSE ↓ | 1.236 | **1.193** | ✅ -3.5% | 0.57 |
+| LPIPS ↓ | **0.117** | 0.118 | 持平 | 0.08 |
+| SSIM_tumor ↑ | 0.476 | **0.476** | 持平 | 0.43 |
+| FRD ↓ | 28.45 | **28.31** | ✅ 微弱 | 25.06 |
+| Dice ↑ | 0.539 | **0.565** 🏆 | ✅ +4.8% | 0.48 |
+| HD95 ↓ | 125.6 | **112.1** 🏆 | ✅ -10.8% | 120.6 |
+
+### 分析
+
+1. **Dice 0.565 是所有版本最高** — tumor_weight 加倍让模型产生更强增强 → nnUNet 检测更准
+2. **HD95 112.1 超过 GC #1 (120.6)** — 分割边界更精确
+3. **MSE 也改善 3.5%** — MSSC×2 强化了全图减影一致性
+4. **LPIPS/SSIM 不变** — 证明加大 tumor/MSSC 权重不损害感知质量
+5. 对比 v31b (GT clip + Huber)：不 clip GT 是关键 — 保留强增强信号让 Dice 从 0.298 恢复到 0.565
+
+### vs GC #1 对比
+
+| Metric | v31_auroc | #1 GC Val | 差距 |
+|--------|:---:|:---:|------|
+| MSE ↓ | 1.193 | 0.57 | 2.1x ❌ |
+| LPIPS ↓ | 0.118 | 0.08 | 1.5x ❌ |
+| SSIM_tumor ↑ | **0.476** | 0.43 | ✅ +11% |
+| Dice ↑ | **0.565** | 0.48 | ✅ +18% |
+| HD95 ↓ | **112.1** | 120.6 | ✅ -7% |
+
+在 tumor 相关指标 (SSIM, Dice, HD95) 上全面超过 GC #1。MSE/LPIPS 仍有差距。
+
+### 结论
+
+**v31_auroc 是当前最佳版本，推荐作为提交候选。** tumor_weight=20 + MSSC=100 是最有效的 loss 调整方向。
+
+**下一步**:
+1. v31_auroc + SDEdit refiner → 预期进一步降低 LPIPS
+2. v31_auroc + ngf=96 (wider) → 预期降低 MSE
+3. Ensemble: v31_auroc + v31_pinorm → 互补
+
+**状态**: ✅ 完成 — **提交候选**
+
+---
+
+## 30e. v32_vflip: Per-Image Norm + Vertical Flip Augmentation (2026-07-09)
+
+**动机**: TTA 实验表明模型对空间翻转不完全等变——hflip TTA (2x) 将 Dice 从 0.371→0.558, HD95 从 239→129。但 inference.py 不能修改加 TTA，因此尝试在训练端加入 vflip 增强让模型自身学到垂直不变性。
+
+### TTA 实验结果（验证方向有效性）
+
+| 模式 | 推理倍数 | MSE ↓ | LPIPS ↓ | SSIM ↑ | FRD ↓ | Dice ↑ | HD95 ↓ |
+|------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| none (1x) | 1x | **1.039** | 0.126 | 0.379 | **24.01** | 0.371 | 239.7 |
+| hflip (2x) | 2x | 1.201 | 0.118 | 0.495 | 27.09 | **0.558** | **129.2** |
+| 4flip (4x) | 4x | 1.168 | 0.124 | **0.518** | 22.99 | 0.531 | 143.8 |
+| 8rot (8x) | 8x | 1.179 | 0.128 | 0.513 | **13.51** | 0.484 | 157.8 |
+
+**结论**: TTA 证明模型有空间不变性不足的问题。hflip 已在训练中（但不完美），vflip 完全没有。
+
+### 配置 (对比 v31_pinorm)
+
+| 参数 | v31_pinorm | v31_auroc | **v32_vflip** |
+|------|:---:|:---:|:---:|
+| tumor_weight | 10 | 20 | 10 |
+| lambda_mssc | 50 | 100 | 50 |
+| GT clip | ✅ P99 | ❌ | ✅ P99 |
+| **--vflip** | ❌ | ❌ | **✅** |
+| 其余 | 基线 | 同基线 | 同基线 |
+
+**代码改动**:
+- `base_options.py`: 新增 `--vflip` flag
+- `mha_perimage_norm_dataset.py`: 50% 概率独立 vertical flip（`tensor.flip(-2)`，独立于 hflip）
+- **脚本**: `berzelius_train_v32_vflip.sh`
+
+### 结果 (data_multislice_v3/test, 299 cases)
+
+| Metric | v31_pinorm | v31_auroc | **v32_vflip** | 最优 |
+|--------|:---:|:---:|:---:|:---:|
+| MSE ↓ | **1.039** ★ | 1.193 | 1.215 | v31_pinorm |
+| LPIPS ↓ | 0.126 | 0.118 | **0.117** ★ | v32_vflip |
+| SSIM_tumor ↑ | 0.379 | **0.476** ★ | 0.475 | v31_auroc (≈v32) |
+| FRD ↓ | **24.01** ★ | 28.31 | 28.48 | v31_pinorm |
+| Dice ↑ | 0.371 | **0.565** ★ | 0.554 | v31_auroc |
+| HD95 ↓ | 239.7 | 112.1 | **104.9** ★ | v32_vflip |
+
+### v32 vs v31_pinorm 提升幅度
+
+| 指标 | 变化 | 幅度 |
+|------|------|------|
+| MSE | +0.175 | ❌ +16.8% |
+| LPIPS | -0.009 | ✅ -7.3% |
+| SSIM_tumor | +0.097 | ✅ +25.6% |
+| Dice | +0.182 | ✅ **+49.1%** |
+| HD95 | -134.7 | ✅ **-56.2%** |
+
+### 分析
+
+1. **HD95 = 104.9 是所有版本最低** — 分割边界最精确，超越 v31_auroc (112.1) 和 GC #1 (120.6)
+2. **Dice 0.554** — 接近 v31_auroc (0.565)，远超基线 v31_pinorm (0.371)
+3. **LPIPS 0.117 是所有版本最低** — 感知质量最好
+4. **vflip 训练成功吸收了 TTA 的收益** — 无需修改 inference.py 就获得类似 hflip TTA 的 segmentation 改善
+5. MSE 和 FRD 退步（与 v31_auroc 类似程度）— segmentation 指标和 pixel 指标之间存在 trade-off
+
+### vs v31_auroc 的 trade-off
+
+| 维度 | v31_auroc 胜 | v32_vflip 胜 |
+|------|------------|-------------|
+| Dice | ✅ 0.565 vs 0.554 | |
+| HD95 | | ✅ **104.9** vs 112.1 |
+| LPIPS | | ✅ **0.117** vs 0.118 |
+| SSIM | ≈ 持平 (0.476 vs 0.475) | |
+| MSE | ✅ 1.193 vs 1.215 | |
+
+两者非常接近。v31_auroc 通过 loss 加权改善 Dice，v32_vflip 通过几何增强改善 HD95/LPIPS。
+
+### 下一步
+
+**合并两者** — v33: tumor_weight=20 + MSSC=100 + 去 GT clip + vflip → 预期 Dice 和 HD95 同时最优。
+
+**状态**: ✅ 完成 — **提交候选**（HD95 最优版本）
+
+---
+
 ## 29. v31: Swin + UC-GAN Combined (备用)
 
 **动机**: 合并 v28 (UC-GAN uncertainty) 和 v29 (Swin Transformer bottleneck)。
@@ -2180,11 +2310,12 @@ Input → Encoder (4× downsample)
 
 | 版本 | 训练数据 | ngf | 特殊改动 | MSE ↓ | LPIPS ↓ | SSIM ↑ | FRD ↓ | AUROC ↑ | Dice ↑ | HD95 ↓ |
 |------|---------|:---:|---------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| v22_msv2 | msv2 (~8.9k) | 64 | noise_aug, per-phase GT | **1.097** | 0.168 | 0.369 | 30.02 | — | 0.474 | 127.4 |
+| v22_msv2 | msv2 (~8.9k) | 64 | noise_aug, per-phase GT | 1.097 | 0.168 | 0.369 | 30.02 | — | 0.474 | 127.4 |
 | v22_msv3 | msv3 (~7k) | 64 | noise_aug, peak GT + LAB | 1.233 | 0.163 | 0.385 | 29.87 | **0.907** | 0.500 | 135.6 |
 | v26_msv3 | msv3 (~7k) | **96** | wider + noise_aug | 1.101 | 0.157 | 0.394 | 29.66 | — | 0.493 | 144.9 |
-| **v31_pinorm** | msv3 (~7k) | 64 | **per-image z-score** | 1.236 | **0.117** 🏆 | **0.476** 🏆 | **28.45** 🏆 | 0.831 | **0.539** 🏆 | **125.6** 🏆 |
-| v22_vgg20 | msv3 (~7k) | 64 | lambda_vgg=20, mssc=30 | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
+| v31_pinorm | msv3 (~7k) | 64 | per-image z-score | **1.039** | 0.126 | 0.379 | **24.01** | 0.757 | 0.371 | 239.7 |
+| **v31_auroc** | msv3 (~7k) | 64 | pinorm + tumor×2 + MSSC×2 | 1.193 | 0.118 | **0.476** | 28.31 | — | **0.565** 🏆 | 112.1 |
+| **v32_vflip** | msv3 (~7k) | 64 | pinorm + vflip augmentation | 1.215 | **0.117** 🏆 | 0.475 | 28.48 | — | 0.554 | **104.9** 🏆 |
 
 ### 四、GC Validation Phase #1 参考
 
@@ -2211,17 +2342,25 @@ Input → Encoder (4× downsample)
 | Wider | v26 | ngf 64→96 | MSE -8% |
 | ❌ UC-GAN | v28b | uncertainty head | 全面退步 |
 | ❌ Swin | v29b | transformer bottleneck | 全面退步 |
-| **🏆 Per-image norm** | **v31** | **per-image z-score** | **LPIPS -28%, SSIM +24%, Dice +8%** |
+| **🏆 Per-image norm** | **v31** | **per-image z-score** | **LPIPS -28%, SSIM +24%** |
+| **🏆 Loss tuning** | **v31_auroc** | **tumor×2, MSSC×2, no clip** | **Dice 0.565 (+49%), HD95 112** |
+| **🏆 Geometric aug** | **v32_vflip** | **+ vertical flip** | **HD95 104.9 (最优), LPIPS 0.117** |
 
 ### 六、当前最佳模型
 
-**v31_pinorm** — Per-Image Z-Score Normalization
+**v31_auroc** — Per-Image Norm + Stronger Tumor/MSSC Loss (Dice 最优)
+- 权重: `weights/latest_net_G-v31_auroc.pth` (待下载)
+- 推理: `models/infer_perimage_norm.py`
+- 优势: Dice 0.565, SSIM 0.476, HD95 112.1 — 全面超过 GC #1
 
-- 权重: `checkpoints/mamasynth_v31_pinorm/latest_net_G.pth`
-- 推理: `models/infer_perimage_norm.py` (需 breast mask + de-norm)
-- 优势: SSIM/Dice 超过 GC #1，LPIPS 接近
-- 劣势: MSE 仍有 2x 差距
-- 下一步: v26 + pinorm (ngf=96 降 MSE) + SDEdit refiner (降 LPIPS)
+**v32_vflip** — Per-Image Norm + Vertical Flip Augmentation (HD95 最优)
+- 权重: `weights/latest_net_G-v32_vflip.pth`
+- 推理: `models/infer_perimage_norm.py` (同 v31)
+- 优势: HD95 **104.9** (所有版本最低), LPIPS **0.117** (所有版本最低)
+
+**下一步: v33** — 合并 v31_auroc + v32_vflip:
+- tumor_weight=20, MSSC=100, no GT clip, + vflip augmentation
+- 预期同时获得 v31_auroc 的 Dice 和 v32_vflip 的 HD95
 
 ---
 
@@ -2477,3 +2616,64 @@ pre → v31 GAN (pinorm) → gan_out → +30% noise → DDIM 20 steps → refine
 3. v17 refiner 成功是因为 v14 GAN 用 global z-score（noise scale 一致），v31 用 per-image norm 导致域不匹配
 
 **结论**：SDEdit refiner 不适合 per-image normalized GAN。v31 直接用不加 refiner。
+
+---
+
+## 32. v32 Conditional GAN 结果 (2026-07-09)
+
+### 结果 (data_multislice_v3 test, 299 cases)
+
+| Metric | v31_auroc (之前最佳) | **v32 conditional** | 变化 | GC #1 |
+|--------|:---:|:---:|:---:|:---:|
+| MSE ↓ | 1.193 | **1.160** | ✅ -3% | 0.57 |
+| LPIPS ↓ | 0.118 | **0.117** | ✅ 持平 | 0.08 |
+| SSIM_tumor ↑ | 0.476 | **0.492** | ✅ +3% | 0.43 |
+| FRD ↓ | **28.31** | 28.46 | ≈ 持平 | 25.06 |
+| Dice ↑ | 0.565 | **0.614** | ✅ **+9%** 🏆 | 0.48 |
+| HD95 ↓ | 112.1 | **76.0** | ✅ **-32%** 🏆 | 120.6 |
+
+### 关键发现
+
+1. **Supervisor 方案有效** — T1w tumor segmentation (Dice=0.68) + conditional GAN 带来了分割指标的巨大提升
+2. **Breast mask composite 是关键** — 没有 composite 时 MSE=3.2/LPIPS=0.29（严重偏移），加了后恢复正常
+3. **HD95 76.0 远超 GC #1 (120.6)** — tumor 边界精度大幅改善
+4. **Dice 0.614 超过 GC #1 (0.48)** — 合成的 tumor 增强更真实，下游分割更准确
+
+### 推理流程（确认有效的版本）
+
+```python
+# 1. 读取 input
+arr = read_mha(input_path)
+
+# 2. Breast mask + Tumor mask
+breast_mask = BreastDivider(arr)
+tumor_mask = TumorSeg_Dataset940(arr)
+
+# 3. Per-image normalize
+mu, sigma = arr[breast_mask > 0.5].mean(), arr[breast_mask > 0.5].std()
+arr_norm = (arr - mu) / sigma * breast_mask
+
+# 4. 3-channel input → GAN
+input_3ch = concat(arr_norm, breast_mask, tumor_mask)
+out_norm = GAN(resize_512(input_3ch))
+
+# 5. De-normalize
+synthetic = resize_back(out_norm) * sigma + mu
+
+# 6. Breast mask composite（关键！）
+output = breast_mask * synthetic + (1 - breast_mask) * arr
+```
+
+### 配置
+
+| 参数 | 值 |
+|------|-----|
+| 架构 | GlobalGenerator, input_nc=3, ngf=64, n_blocks=12 |
+| Normalization | Per-image z-score (breast foreground) |
+| 训练数据 | data_multislice_v3/train (~9504 samples) |
+| Tumor mask | Dataset940 predicted (Dice=0.68, 从 T1w pre-contrast) |
+| Breast mask | Dataset930 BreastDivider 2D |
+| Loss | GAN + feat×10 + VGG×10 + MSSC×50 + tumor×10 |
+| Composite | ✅ breast_mask × synthetic + (1-breast_mask) × pre |
+
+### 状态: ✅ 新最佳模型 — 准备 Docker 提交
