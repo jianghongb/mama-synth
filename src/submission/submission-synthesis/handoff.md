@@ -2681,3 +2681,57 @@ output = breast_mask * synthetic + (1 - breast_mask) * arr
 | Composite | ✅ breast_mask × synthetic + (1-breast_mask) × pre |
 
 ### 状态: ✅ 新最佳模型 — 准备 Docker 提交
+
+---
+
+## 33. v32 Final 配置对比 (2026-07-09)
+
+### 三种 v32 后处理配置对比
+
+| Metric | v32 hard mask | v32 blur (σ=5) | **v32 final (blur+TTA)** | GC #1 |
+|--------|:---:|:---:|:---:|:---:|
+| MSE ↓ | 1.160 | 1.158 | **1.127** | 0.57 |
+| LPIPS ↓ | **0.117** | 0.122 | 0.123 | 0.08 |
+| SSIM_tumor ↑ | 0.492 | 0.492 | **0.509** | 0.43 |
+| FRD ↓ | 28.46 | 28.26 | **27.06** | 25.06 |
+| Dice ↑ | 0.614 | 0.621 | **0.624** | 0.48 |
+| HD95 ↓ | 76.0 | **67.3** | 69.4 | 120.6 |
+
+### 各后处理效果分析
+
+| 后处理 | 改善 | 损害 |
+|--------|------|------|
+| Gaussian blur (σ=5) | HD95 -12%, Dice +1% | LPIPS +4% |
+| hflip TTA | MSE -3%, SSIM +3%, FRD -5%, Dice +0.5% | HD95 +3%, LPIPS +1% |
+| blur + TTA 合计 | MSE -3%, SSIM +3%, FRD -5%, Dice +2% | LPIPS +5%, HD95 -9% (vs hard) |
+
+### 提交策略
+
+GC 使用 Mean Position 排名（8 个指标各自排名后取均值）。
+
+- **主提交**: v32 blur + TTA — 综合最强，4/6 指标最优
+- **备选提交**: v32 blur (no TTA) — HD95 最佳 (67.3)，LPIPS 更好 (0.122)
+
+### vs GC #1 (MamoAnd) 超越的指标
+
+| Metric | GC #1 | v32 final | 超越幅度 |
+|--------|:---:|:---:|:---:|
+| SSIM_tumor ↑ | 0.43 | **0.509** | ✅ +18% |
+| Dice ↑ | 0.48 | **0.624** | ✅ +30% |
+| HD95 ↓ | 120.6 | **69.4** | ✅ -42% |
+
+仍落后: MSE (2x gap), LPIPS (1.5x gap), FRD (轻微)
+
+### 最终推理流程 (Docker)
+
+```
+Input → BreastDivider → breast_mask
+      → TumorSeg (D940) → tumor_mask
+      → Per-image z-score (breast foreground)
+      → GAN(3ch) × 2 (original + hflip) → average
+      → De-normalize
+      → Gaussian blur (σ=5) soft mask composite
+      → Output
+```
+
+推理时间: ~8s/case (T4 GPU), 远在 10min 限制内。
