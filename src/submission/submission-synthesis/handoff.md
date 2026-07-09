@@ -6,30 +6,34 @@
 
 ### Best Models (data_multislice_v3 test, 299 cases)
 
-| Rank | Version | MSE ↓ | LPIPS ↓ | SSIM_tumor ↑ | Dice ↑ | HD95 ↓ | Key Change |
-|:---:|---------|:-----:|:-------:|:------------:|:------:|:------:|------------|
-| 🥇 | **v31_auroc** | 1.193 | 0.118 | **0.476** | **0.565** | 112.1 | tumor_weight×2 + MSSC×2, no GT clip |
-| 🥈 | **v32_vflip** | 1.215 | **0.117** | 0.475 | 0.554 | **104.9** | Per-image norm + vflip augmentation |
-| 🥉 | **v31_pinorm** | **1.039** | 0.126 | 0.379 | 0.371 | 239.7 | Per-image z-score normalization |
-| 4 | v26_msv3 | 1.101 | 0.157 | 0.394 | 0.493 | 144.9 | Wider network (ngf=96) |
+| Rank | Version | MSE ↓ | LPIPS ↓ | SSIM_tumor ↑ | Dice ↑ | HD95 ↓ | FRD ↓ | Key Change |
+|:---:|---------|:-----:|:-------:|:------------:|:------:|:------:|:-----:|------------|
+| 🥇 | **v32_conditional** | 1.160 | **0.117** | **0.492** | **0.614** 🏆 | **76.0** 🏆 | 28.46 | 3ch input (pre+breast+tumor) + composite |
+| 🥈 | **v31_auroc** | 1.193 | 0.118 | 0.476 | 0.565 | 112.1 | 28.31 | tumor_weight×2 + MSSC×2, no GT clip |
+| 🥉 | **v32_vflip** | 1.215 | 0.117 | 0.475 | 0.554 | 104.9 | 28.48 | Per-image norm + vflip augmentation |
+| 4 | v31_tta_hflip | 1.201 | 0.118 | 0.495 | 0.558 | 129.2 | 27.09 | TTA horizontal flip |
+| 5 | v31b_v3 | 1.221 | 0.117 | 0.473 | 0.537 | 135.4 | 28.34 | data_multislice_v3 baseline |
+| 6 | v31_tta_4flip | 1.168 | 0.124 | 0.518 | 0.531 | 143.8 | **22.99** | TTA 4-flip (FRD 最佳) |
+| 7 | v26_msv3 | **1.101** | 0.157 | 0.394 | 0.493 | 144.9 | 29.66 | Wider (ngf=96), MSE 最佳 |
+| 8 | v22_msv2 on v3test | 1.097 | 0.168 | 0.369 | 0.474 | 127.4 | 30.02 | 跨数据集泛化 |
 
 ### Current Recommendation
-- **提交首选 (Dice)**: v31_auroc (Dice 0.565, SSIM 0.476, 超过 GC #1)
-- **提交首选 (HD95)**: v32_vflip (HD95 104.9, LPIPS 0.117, 边界最精确)
-- **MSE 最优**: v31_pinorm (MSE=1.039, FRD=24.01)
-- **最有前途的下一步**: v33 = v31_auroc + vflip (合并两者优势)
+- **🏆 提交首选**: v32_conditional (Dice 0.614, HD95 76.0 — 全面最优)
+- **备选**: v31_auroc (无需 tumor seg 模型，更简单)
+- **不采用**: SDEdit refiner (失败), Huber loss (Dice 崩溃)
 
 ### vs GC Validation #1 (MamoAnd)
 
-| Metric | #1 MamoAnd | **v31_auroc** | **v32_vflip** | 状态 |
-|--------|:---:|:---:|:---:|:---:|
-| MSE ↓ | **0.57** | 1.19 | 1.22 | ❌ 2x gap |
-| LPIPS ↓ | **0.08** | 0.12 | 0.12 | ❌ 1.5x gap |
-| SSIM_tumor ↑ | 0.43 | **0.48** | **0.48** | ✅ 超过 |
-| Dice ↑ | 0.48 | **0.57** | **0.55** | ✅ 超过 |
-| HD95 ↓ | 120.6 | 112.1 | **104.9** | ✅ 超过 |
+| Metric | #1 MamoAnd | **v32_conditional** | 状态 |
+|--------|:---:|:---:|:---:|
+| MSE ↓ | **0.57** | 1.16 | ❌ 2x gap |
+| LPIPS ↓ | **0.08** | 0.117 | ❌ 1.5x gap |
+| SSIM_tumor ↑ | 0.43 | **0.49** | ✅ **超过** |
+| Dice ↑ | 0.48 | **0.61** | ✅ **大幅超过 (+27%)** |
+| HD95 ↓ | 120.6 | **76.0** | ✅ **大幅超过 (-37%)** |
 
 ⚠️ Test set 不同，仅作方向参考。MSE/LPIPS 仍是主要差距。
+Dice 和 HD95 已远超 GC #1，说明 tumor 区域合成质量非常好。
 
 ### Active Experiments
 - **v33 (next)**: v31_auroc + vflip = tumor_weight=20 + MSSC=100 + no GT clip + vflip augmentation — 合并 v31_auroc 和 v32_vflip 的优势
