@@ -22,10 +22,13 @@ COPY --chown=user:user inference_v32.py ./inference.py
 # Copy weights
 # GAN weights (~730 MB)
 COPY --chown=user:user weights/latest_net_G.pth ./weights/latest_net_G.pth
-# Breast segmentation (Dataset930, ~120 MB)
-COPY --chown=user:user weights/breast_seg/ ./weights/breast_seg/
-# Tumor segmentation (Dataset940, ~120 MB)
-COPY --chown=user:user weights/tumor_seg/ ./weights/tumor_seg/
+# Breast segmentation (Dataset930 fold_0, ~120 MB)
+COPY --chown=user:user weights/breast_seg_v32/ ./weights/breast_seg/
+# Tumor segmentation (Dataset940 fold_0, ~120 MB)
+COPY --chown=user:user weights/tumor_seg/dataset.json ./weights/tumor_seg/dataset.json
+COPY --chown=user:user weights/tumor_seg/dataset_fingerprint.json ./weights/tumor_seg/dataset_fingerprint.json
+COPY --chown=user:user weights/tumor_seg/plans.json ./weights/tumor_seg/plans.json
+COPY --chown=user:user weights/tumor_seg/fold_0/checkpoint_final.pth ./weights/tumor_seg/fold_0/checkpoint_final.pth
 
 RUN mkdir -p /output && chown user:user /output
 
