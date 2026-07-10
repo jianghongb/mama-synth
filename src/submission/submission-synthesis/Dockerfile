@@ -25,11 +25,14 @@ COPY --chown=user:user models/__init__.py ./models/__init__.py
 # Inference entry point
 COPY --chown=user:user inference_v32.py ./inference.py
 
-# Weights: Pix2PixHD GAN (v32_vflip)
+# Weights: Pix2PixHD GAN (v32_vflip, 912 MB)
 COPY --chown=user:user weights/latest_net_G.pth ./weights/latest_net_G.pth
 
-# Weights: Dataset910 breast seg (10-class, includes heart=7)
-COPY --chown=user:user weights/breast_seg/ ./weights/breast_seg/
+# Weights: Dataset930 BreastDivider 2D (breast mask, ~120 MB)
+COPY --chown=user:user weights/breast_seg_930/ ./weights/breast_seg_930/
+
+# Weights: Dataset910 ResEncUNetL (heart mask from 10-class, ~1.6 GB)
+COPY --chown=user:user weights/breast_seg_910/ ./weights/breast_seg_910/
 
 RUN mkdir -p /output && chown user:user /output
 

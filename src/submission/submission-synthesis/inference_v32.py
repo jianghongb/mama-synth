@@ -2,11 +2,12 @@
 """MAMA-SYNTH Grand Challenge – Final Submission Inference.
 
 Pipeline:
-  1. Dataset910 (10-class) → breast_mask + heart_mask
-  2. Per-image z-score normalize (breast foreground)
-  3. Pix2PixHD GAN with hflip TTA (2x inference, averaged)
-  4. De-normalize back to global z-score space
-  5. Composite: breast=synthetic, heart=pre+adaptive_offset, other_bg=pre
+  1. Dataset930 (BreastDivider 2D) → breast_mask (binary)
+  2. Dataset910 (10-class) → heart_mask (label=7)
+  3. Per-image z-score normalize (breast foreground)
+  4. Pix2PixHD GAN with hflip TTA (2x inference, averaged)
+  5. De-normalize back to global z-score space
+  6. Composite: breast=synthetic, heart=pre+adaptive_offset, other_bg=pre
 
 Grand Challenge I/O contract:
   Input:  /input/images/pre-contrast-dce-mri-slice-breast/<uuid>.mha
@@ -34,7 +35,9 @@ OUTPUT_SLUG = "synthetic-contrast-dce-mri-slice-breast"
 
 WEIGHTS_PATH = os.environ.get("MAMA_WEIGHTS_PATH", "/opt/app/weights/latest_net_G.pth")
 BREAST_SEG_PATH = os.environ.get("MAMA_BREAST_SEG_PATH",
-                                  "/opt/app/weights/breast_seg/nnUNetTrainer__nnUNetResEncUNetLPlans__2d")
+                                  "/opt/app/weights/breast_seg_930")
+HEART_SEG_PATH = os.environ.get("MAMA_HEART_SEG_PATH",
+                                 "/opt/app/weights/breast_seg_910")
 
 MODEL_SIZE = 512
 NGF = int(os.environ.get("MAMA_NGF", "64"))
@@ -54,10 +57,10 @@ def build_generator(device):
     return netG
 
 
-def build_breast_seg(device):
-    """Load Dataset910 nnUNet (10-class) for breast + heart segmentation."""
-    if not Path(BREAST_SEG_PATH).exists():
-        print(f"WARNING: Breast seg not found at {BREAST_SEG_PATH}, using threshold fallback")
+def build_nnunet_predictor(model_path, device, checkpoint="checkpoint_best.pth"):
+    """Load an nnUNet predictor from a trained model folder."""
+    if not Path(model_path).exists():
+        print(f"WARNING: Model not found at {model_path}")
         return None
     os.environ.setdefault("nnUNet_raw", "/tmp/nnunet_raw")
     os.environ.setdefault("nnUNet_preprocessed", "/tmp/nnunet_preprocessed")
@@ -70,17 +73,13 @@ def build_breast_seg(device):
         verbose=False, allow_tqdm=False,
     )
     predictor.initialize_from_trained_model_folder(
-        BREAST_SEG_PATH, use_folds=(0,), checkpoint_name="checkpoint_best.pth",
+        model_path, use_folds=(0,), checkpoint_name=checkpoint,
     )
     return predictor
 
 
-def predict_segmentation(predictor, slice_2d):
-    """Run nnUNet 10-class prediction, return label map.
-
-    Labels: 0=bg, 1=tissue, 2=vessel, 3=muscle, 4=bone,
-            5=lesion, 6=lymphnode, 7=heart, 8=liver, 9=implant
-    """
+def predict_seg(predictor, slice_2d):
+    """Run nnUNet prediction on a 2D slice, return label map."""
     props = {
         "sitk_stuff": {
             "spacing": (1.0, 1.0, 1.0),
@@ -94,13 +93,6 @@ def predict_segmentation(predictor, slice_2d):
     while pred.ndim > 2:
         pred = pred[0]
     return pred
-
-
-def get_masks(seg_map):
-    """Extract breast mask and heart mask from 10-class segmentation."""
-    breast_mask = np.isin(seg_map, [1, 2, 5, 6, 9]).astype(np.float32)
-    heart_mask = (seg_map == 7).astype(np.float32)
-    return breast_mask, heart_mask
 
 
 def find_input_image() -> Path:
@@ -119,7 +111,8 @@ def main():
     # Load models
     print("Loading models...")
     netG = build_generator(device)
-    breast_seg = build_breast_seg(device)
+    breast_seg = build_nnunet_predictor(BREAST_SEG_PATH, device, "checkpoint_final.pth")
+    heart_seg = build_nnunet_predictor(HEART_SEG_PATH, device, "checkpoint_best.pth")
     print(f"Generator: ngf={NGF}, n_blocks={N_BLOCKS}, residual_mode")
     print("Models loaded.")
 
@@ -132,47 +125,48 @@ def main():
     sl = arr.squeeze()
     orig_h, orig_w = sl.shape
 
-    # === Step 1: Segmentation → breast_mask + heart_mask ===
+    # === Step 1: Breast mask (Dataset930 - binary) ===
     if breast_seg is not None:
-        seg_map = predict_segmentation(breast_seg, sl)
-        breast_mask, heart_mask = get_masks(seg_map)
-        # Dilate heart mask slightly (segmentation boundary can be tight)
+        breast_pred = predict_seg(breast_seg, sl)
+        breast_mask = (breast_pred > 0).astype(np.float32)
+    else:
+        breast_mask = (sl > -0.3).astype(np.float32)
+
+    # === Step 2: Heart mask (Dataset910 - label 7) ===
+    if heart_seg is not None:
+        heart_pred = predict_seg(heart_seg, sl)
+        heart_mask = (heart_pred == 7).astype(np.float32)
+        # Dilate heart mask slightly
         from scipy.ndimage import binary_dilation
         heart_mask = binary_dilation(heart_mask, iterations=3).astype(np.float32)
     else:
-        # Fallback: threshold-based breast mask, no heart
-        breast_mask = (sl > -0.3).astype(np.float32)
         heart_mask = np.zeros_like(sl)
 
-    # === Step 2: Per-image z-score normalize (breast foreground) ===
+    # === Step 3: Per-image z-score normalize (breast foreground) ===
     fg_pixels = sl[breast_mask > 0.5]
     if fg_pixels.size > 100:
         img_mean = float(fg_pixels.mean())
-        img_std = float(fg_pixels.std())
-        img_std = max(img_std, 1e-8)
+        img_std = max(float(fg_pixels.std()), 1e-8)
     else:
         img_mean, img_std = 0.0, 1.0
 
     sl_norm = (sl - img_mean) / img_std * breast_mask  # zero background
 
-    # === Step 3: GAN inference with hflip TTA ===
+    # === Step 4: GAN inference with hflip TTA ===
     t = torch.from_numpy(sl_norm).unsqueeze(0).unsqueeze(0).float().to(device)
     t = F.interpolate(t, size=(MODEL_SIZE, MODEL_SIZE), mode="bilinear", align_corners=False)
 
     with torch.no_grad():
-        # Original forward pass
         out_1 = netG(t)
-        # Horizontal flip TTA
         out_2 = netG(t.flip(-1)).flip(-1)
-        # Average
         out_norm = (out_1 + out_2) / 2.0
 
-    # === Step 4: De-normalize ===
+    # === Step 5: De-normalize ===
     result_norm = F.interpolate(out_norm, size=(orig_h, orig_w), mode="bilinear", align_corners=False)
     result_norm = result_norm[0, 0].cpu().numpy()
     synthetic = result_norm * img_std + img_mean
 
-    # === Step 5: Composite with heart offset ===
+    # === Step 6: Composite with heart offset ===
     # Heart region: adaptive offset (contrast agent pools in heart blood)
     heart_bg = heart_mask * (1 - breast_mask)  # heart outside breast only
     heart_offset = np.clip(sl * 1.0, 0, 4.0) * heart_bg
