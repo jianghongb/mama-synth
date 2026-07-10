@@ -4,10 +4,11 @@
 Pipeline:
   1. Dataset930 (BreastDivider 2D) → breast_mask (binary)
   2. Dataset910 (10-class) → heart_mask (label=7)
-  3. Per-image z-score normalize (breast foreground)
-  4. Pix2PixHD GAN with hflip TTA (2x inference, averaged)
-  5. De-normalize back to global z-score space
-  6. Composite: breast=synthetic, heart=pre+adaptive_offset, other_bg=pre
+  3. Dataset940 (T1w Tumor Seg) → tumor_mask (binary, for future use)
+  4. Per-image z-score normalize (breast foreground)
+  5. Pix2PixHD GAN with hflip TTA (2x inference, averaged)
+  6. De-normalize back to global z-score space
+  7. Composite: breast=synthetic, heart=pre+adaptive_offset, other_bg=pre
 
 Grand Challenge I/O contract:
   Input:  /input/images/pre-contrast-dce-mri-slice-breast/<uuid>.mha
@@ -38,6 +39,8 @@ BREAST_SEG_PATH = os.environ.get("MAMA_BREAST_SEG_PATH",
                                   "/opt/app/weights/breast_seg_930")
 HEART_SEG_PATH = os.environ.get("MAMA_HEART_SEG_PATH",
                                  "/opt/app/weights/breast_seg_910")
+TUMOR_SEG_PATH = os.environ.get("MAMA_TUMOR_SEG_PATH",
+                                 "/opt/app/weights/tumor_seg")
 
 MODEL_SIZE = 512
 NGF = int(os.environ.get("MAMA_NGF", "64"))
@@ -113,6 +116,7 @@ def main():
     netG = build_generator(device)
     breast_seg = build_nnunet_predictor(BREAST_SEG_PATH, device, "checkpoint_final.pth")
     heart_seg = build_nnunet_predictor(HEART_SEG_PATH, device, "checkpoint_best.pth")
+    tumor_seg = build_nnunet_predictor(TUMOR_SEG_PATH, device, "checkpoint_final.pth")
     print(f"Generator: ngf={NGF}, n_blocks={N_BLOCKS}, residual_mode")
     print("Models loaded.")
 
@@ -142,7 +146,15 @@ def main():
     else:
         heart_mask = np.zeros_like(sl)
 
-    # === Step 3: Per-image z-score normalize (breast foreground) ===
+    # === Step 3: Tumor mask (Dataset940 - binary) ===
+    if tumor_seg is not None:
+        tumor_pred = predict_seg(tumor_seg, sl)
+        tumor_mask = (tumor_pred > 0).astype(np.float32)
+    else:
+        tumor_mask = np.zeros_like(sl)
+    print(f"  Masks: breast={breast_mask.sum():.0f}px, heart={heart_mask.sum():.0f}px, tumor={tumor_mask.sum():.0f}px")
+
+    # === Step 4: Per-image z-score normalize (breast foreground) ===
     fg_pixels = sl[breast_mask > 0.5]
     if fg_pixels.size > 100:
         img_mean = float(fg_pixels.mean())
@@ -152,7 +164,7 @@ def main():
 
     sl_norm = (sl - img_mean) / img_std * breast_mask  # zero background
 
-    # === Step 4: GAN inference with hflip TTA ===
+    # === Step 5: GAN inference with hflip TTA ===
     t = torch.from_numpy(sl_norm).unsqueeze(0).unsqueeze(0).float().to(device)
     t = F.interpolate(t, size=(MODEL_SIZE, MODEL_SIZE), mode="bilinear", align_corners=False)
 
@@ -161,12 +173,12 @@ def main():
         out_2 = netG(t.flip(-1)).flip(-1)
         out_norm = (out_1 + out_2) / 2.0
 
-    # === Step 5: De-normalize ===
+    # === Step 6: De-normalize ===
     result_norm = F.interpolate(out_norm, size=(orig_h, orig_w), mode="bilinear", align_corners=False)
     result_norm = result_norm[0, 0].cpu().numpy()
     synthetic = result_norm * img_std + img_mean
 
-    # === Step 6: Composite with heart offset ===
+    # === Step 7: Composite with heart offset ===
     # Heart region: adaptive offset (contrast agent pools in heart blood)
     heart_bg = heart_mask * (1 - breast_mask)  # heart outside breast only
     heart_offset = np.clip(sl * 1.0, 0, 4.0) * heart_bg
