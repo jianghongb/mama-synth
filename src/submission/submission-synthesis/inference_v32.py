@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""MAMA-SYNTH Grand Challenge – v32 Conditional GAN Docker inference.
+"""MAMA-SYNTH Grand Challenge – Final Submission Inference.
 
 Pipeline:
-  1. BreastDivider 2D → breast_mask
-  2. T1w Tumor Seg (Dataset940) → predicted_tumor_mask
-  3. Per-image z-score normalize (breast foreground)
-  4. GAN(concat(pre_norm, breast_mask, tumor_mask)) → synthetic_norm
-  5. De-normalize → synthetic
-  6. Breast mask composite: output = breast_mask × synthetic + (1-breast_mask) × pre
+  1. Dataset910 (10-class) → breast_mask + heart_mask
+  2. Per-image z-score normalize (breast foreground)
+  3. Pix2PixHD GAN with hflip TTA (2x inference, averaged)
+  4. De-normalize back to global z-score space
+  5. Composite: breast=synthetic, heart=pre+adaptive_offset, other_bg=pre
 
 Grand Challenge I/O contract:
   Input:  /input/images/pre-contrast-dce-mri-slice-breast/<uuid>.mha
@@ -35,17 +34,18 @@ OUTPUT_SLUG = "synthetic-contrast-dce-mri-slice-breast"
 
 WEIGHTS_PATH = os.environ.get("MAMA_WEIGHTS_PATH", "/opt/app/weights/latest_net_G.pth")
 BREAST_SEG_PATH = os.environ.get("MAMA_BREAST_SEG_PATH", "/opt/app/weights/breast_seg")
-TUMOR_SEG_PATH = os.environ.get("MAMA_TUMOR_SEG_PATH", "/opt/app/weights/tumor_seg")
 
 MODEL_SIZE = 512
+NGF = int(os.environ.get("MAMA_NGF", "64"))
+N_BLOCKS = int(os.environ.get("MAMA_N_BLOCKS", "12"))
 
 
 def build_generator(device):
-    """Load v32 conditional GAN (input_nc=3)."""
+    """Load Pix2PixHD generator (1-channel input, per-image norm, residual mode)."""
     norm_layer = partial(nn.InstanceNorm2d, affine=False)
     netG = GlobalGenerator(
-        input_nc=3, output_nc=1, ngf=64,
-        n_downsampling=4, n_blocks=12,
+        input_nc=1, output_nc=1, ngf=NGF,
+        n_downsampling=4, n_blocks=N_BLOCKS,
         norm_layer=norm_layer, residual_mode=True,
     )
     netG.load_state_dict(torch.load(WEIGHTS_PATH, map_location=device))
@@ -54,7 +54,10 @@ def build_generator(device):
 
 
 def build_breast_seg(device):
-    """Load BreastDivider 2D (Dataset930) for breast segmentation."""
+    """Load Dataset910 nnUNet (10-class) for breast + heart segmentation."""
+    if not Path(BREAST_SEG_PATH).exists():
+        print(f"WARNING: Breast seg not found at {BREAST_SEG_PATH}, using threshold fallback")
+        return None
     os.environ.setdefault("nnUNet_raw", "/tmp/nnunet_raw")
     os.environ.setdefault("nnUNet_preprocessed", "/tmp/nnunet_preprocessed")
     os.environ.setdefault("nnUNet_results", "/tmp/nnunet_results")
@@ -66,31 +69,17 @@ def build_breast_seg(device):
         verbose=False, allow_tqdm=False,
     )
     predictor.initialize_from_trained_model_folder(
-        BREAST_SEG_PATH, use_folds=(0,), checkpoint_name="checkpoint_final.pth",
+        BREAST_SEG_PATH, use_folds=(0,), checkpoint_name="checkpoint_best.pth",
     )
     return predictor
 
 
-def build_tumor_seg(device):
-    """Load T1w Tumor Seg (Dataset940)."""
-    os.environ.setdefault("nnUNet_raw", "/tmp/nnunet_raw")
-    os.environ.setdefault("nnUNet_preprocessed", "/tmp/nnunet_preprocessed")
-    os.environ.setdefault("nnUNet_results", "/tmp/nnunet_results")
-    from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
+def predict_segmentation(predictor, slice_2d):
+    """Run nnUNet 10-class prediction, return label map.
 
-    predictor = nnUNetPredictor(
-        tile_step_size=0.5, use_gaussian=True, use_mirroring=False,
-        perform_everything_on_device=True, device=device,
-        verbose=False, allow_tqdm=False,
-    )
-    predictor.initialize_from_trained_model_folder(
-        TUMOR_SEG_PATH, use_folds=(0,), checkpoint_name="checkpoint_final.pth",
-    )
-    return predictor
-
-
-def predict_mask(predictor, slice_2d):
-    """Run nnUNet prediction on a 2D slice, return binary mask."""
+    Labels: 0=bg, 1=tissue, 2=vessel, 3=muscle, 4=bone,
+            5=lesion, 6=lymphnode, 7=heart, 8=liver, 9=implant
+    """
     props = {
         "sitk_stuff": {
             "spacing": (1.0, 1.0, 1.0),
@@ -103,23 +92,14 @@ def predict_mask(predictor, slice_2d):
     pred = predictor.predict_single_npy_array(input_arr, props, None, None, False)
     while pred.ndim > 2:
         pred = pred[0]
-    return (pred > 0).astype(np.float32)
+    return pred
 
 
-def postprocess_breast_mask(mask):
-    """Clean up breast mask: remove small components."""
-    from scipy import ndimage as ndi
-
-    bm = mask.astype(np.uint8)
-    labeled, n = ndi.label(bm)
-    if n > 1:
-        sizes = ndi.sum(bm, labeled, range(1, n + 1))
-        thresh = sizes.max() * 0.1
-        bm = np.zeros_like(bm, dtype=np.uint8)
-        for i, s in enumerate(sizes):
-            if s >= thresh:
-                bm[labeled == (i + 1)] = 1
-    return bm.astype(np.float32)
+def get_masks(seg_map):
+    """Extract breast mask and heart mask from 10-class segmentation."""
+    breast_mask = np.isin(seg_map, [1, 2, 5, 6, 9]).astype(np.float32)
+    heart_mask = (seg_map == 7).astype(np.float32)
+    return breast_mask, heart_mask
 
 
 def find_input_image() -> Path:
@@ -139,7 +119,7 @@ def main():
     print("Loading models...")
     netG = build_generator(device)
     breast_seg = build_breast_seg(device)
-    tumor_seg = build_tumor_seg(device)
+    print(f"Generator: ngf={NGF}, n_blocks={N_BLOCKS}, residual_mode")
     print("Models loaded.")
 
     # Read input
@@ -151,45 +131,53 @@ def main():
     sl = arr.squeeze()
     orig_h, orig_w = sl.shape
 
-    # Step 1: Breast segmentation
-    breast_mask = predict_mask(breast_seg, sl)
-    breast_mask = postprocess_breast_mask(breast_mask)
-
-    # Step 2: Tumor segmentation
-    tumor_mask = predict_mask(tumor_seg, sl)
-
-    # Step 3: Per-image z-score normalize (breast foreground)
-    fg = sl[breast_mask > 0.5]
-    if fg.size > 100:
-        mu = float(fg.mean())
-        sigma = max(float(fg.std()), 1e-8)
+    # === Step 1: Segmentation → breast_mask + heart_mask ===
+    if breast_seg is not None:
+        seg_map = predict_segmentation(breast_seg, sl)
+        breast_mask, heart_mask = get_masks(seg_map)
+        # Dilate heart mask slightly (segmentation boundary can be tight)
+        from scipy.ndimage import binary_dilation
+        heart_mask = binary_dilation(heart_mask, iterations=3).astype(np.float32)
     else:
-        mu, sigma = 0.0, 1.0
-    sl_norm = (sl - mu) / sigma * breast_mask
+        # Fallback: threshold-based breast mask, no heart
+        breast_mask = (sl > -0.3).astype(np.float32)
+        heart_mask = np.zeros_like(sl)
 
-    # Step 4: Build 3-channel input and run GAN (with hflip TTA)
-    input_3ch = np.stack([sl_norm, breast_mask, tumor_mask], axis=0)  # (3, H, W)
-    t = torch.from_numpy(input_3ch).unsqueeze(0).float().to(device)  # (1, 3, H, W)
+    # === Step 2: Per-image z-score normalize (breast foreground) ===
+    fg_pixels = sl[breast_mask > 0.5]
+    if fg_pixels.size > 100:
+        img_mean = float(fg_pixels.mean())
+        img_std = float(fg_pixels.std())
+        img_std = max(img_std, 1e-8)
+    else:
+        img_mean, img_std = 0.0, 1.0
+
+    sl_norm = (sl - img_mean) / img_std * breast_mask  # zero background
+
+    # === Step 3: GAN inference with hflip TTA ===
+    t = torch.from_numpy(sl_norm).unsqueeze(0).unsqueeze(0).float().to(device)
     t = F.interpolate(t, size=(MODEL_SIZE, MODEL_SIZE), mode="bilinear", align_corners=False)
 
     with torch.no_grad():
-        # Forward pass
-        out_norm_1 = netG(t)
+        # Original forward pass
+        out_1 = netG(t)
         # Horizontal flip TTA
-        t_flip = t.flip(-1)
-        out_norm_2 = netG(t_flip).flip(-1)
+        out_2 = netG(t.flip(-1)).flip(-1)
         # Average
-        out_norm = (out_norm_1 + out_norm_2) / 2.0
+        out_norm = (out_1 + out_2) / 2.0
 
-    # Step 5: De-normalize
+    # === Step 4: De-normalize ===
     result_norm = F.interpolate(out_norm, size=(orig_h, orig_w), mode="bilinear", align_corners=False)
-    synthetic = result_norm[0, 0].cpu().numpy() * sigma + mu
+    result_norm = result_norm[0, 0].cpu().numpy()
+    synthetic = result_norm * img_std + img_mean
 
-    # Step 6: Breast mask composite (Gaussian blur for smooth boundary)
-    from scipy.ndimage import gaussian_filter
-    soft_mask = gaussian_filter(breast_mask, sigma=5.0)
-    soft_mask = np.clip(soft_mask, 0, 1)
-    result = soft_mask * synthetic + (1 - soft_mask) * sl
+    # === Step 5: Composite with heart offset ===
+    # Heart region: adaptive offset (contrast agent pools in heart blood)
+    heart_bg = heart_mask * (1 - breast_mask)  # heart outside breast only
+    heart_offset = np.clip(sl * 1.0, 0, 4.0) * heart_bg
+
+    # Final: breast=synthetic, background=pre, heart=pre+offset
+    result = breast_mask * synthetic + (1 - breast_mask) * sl + heart_offset
 
     # Write output
     if arr.ndim == 3:
