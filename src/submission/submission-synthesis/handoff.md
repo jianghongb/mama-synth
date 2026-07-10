@@ -2,67 +2,82 @@
 
 ---
 
-## Executive Summary (2026-07-09)
+## Executive Summary (2026-07-10)
 
 ### Best Models (data_multislice_v3 test, 299 cases)
 
 | Rank | Version | MSE ↓ | LPIPS ↓ | SSIM ↑ | FRD ↓ | Dice ↑ | HD95 ↓ | Key Change |
 |:---:|---------|:-----:|:-------:|:------:|:-----:|:------:|:------:|------------|
 | 🥇 | **v32 Final (submission)** | **0.970** | **0.116** | **0.493** | **26.88** | **0.567** | 108.5 | D930 breast + D910 heart offset + hflip TTA |
-| 🥈 | v31_auroc | 1.193 | 0.118 | 0.476 | 28.31 | 0.565 | 112.1 | tumor_weight×2 + MSSC×2 |
-| 🥉 | v32_vflip (no postproc) | 1.215 | 0.117 | 0.475 | 28.48 | 0.554 | **104.9** | HD95 最佳 (无后处理) |
-| 4 | v32 + hflip TTA | 1.186 | 0.119 | 0.493 | 26.88 | 0.574 | 111.6 | TTA only, 无 heart offset |
-| 5 | v31_pinorm | 1.039 | 0.126 | 0.379 | 24.01 | 0.371 | 239.7 | MSE/FRD 最佳 (无后处理) |
-| 7 | v26_msv3 | 1.101 | 0.157 | 0.394 | 29.66 | 0.493 | 144.9 | Wider (ngf=96) |
+| 🥈 | v32 + hflip TTA (no heart) | 1.186 | 0.119 | 0.493 | 26.88 | 0.574 | 111.6 | TTA only |
+| 🥉 | v31_auroc | 1.193 | 0.118 | 0.476 | 28.31 | 0.565 | 112.1 | tumor_weight×2 + MSSC×2 |
+| 4 | v32_vflip (no postproc) | 1.215 | 0.117 | 0.475 | 28.48 | 0.554 | **104.9** | HD95 最佳 |
+| 5 | v31_pinorm (baseline) | 1.039 | 0.126 | 0.379 | 24.01 | 0.371 | 239.7 | MSE/FRD 最佳 |
 
 ### Current Recommendation
-- **🏆 主提交**: v32 final (blur+TTA) — 综合最强，Dice/SSIM/FRD/MSE 最优
-- **备选提交**: v32 blur (no TTA) — HD95 最佳 (67.3)
-- **不采用**: SDEdit refiner (失败), UC-GAN (失败), Swin (无效), Huber loss (Dice 崩溃)
+- **🏆 最终提交**: v32 Final — 1ch GAN + D930 breast + D910 heart offset + hflip TTA
+- **训练中**: v33 (vflip + tumor_weight=20 + MSSC=100), v33b (+ ngf=96)
+- **不采用**: SDEdit refiner (失败), UC-GAN (失败), Swin (无效), 全背景 offset (Dice 崩溃)
 
 ### vs GC Validation #1 (MamoAnd)
 
-| Metric | #1 MamoAnd | **v32 final** | 状态 |
+| Metric | #1 MamoAnd | **v32 Final** | 状态 |
 |--------|:---:|:---:|:---:|
-| MSE ↓ | **0.57** | 1.13 | ❌ 2x gap |
-| LPIPS ↓ | **0.08** | 0.123 | ❌ 1.5x gap |
-| SSIM_tumor ↑ | 0.43 | **0.51** | ✅ **超过 +18%** |
-| FRD ↓ | **25.06** | 27.06 | ❌ 轻微差距 |
-| Dice ↑ | 0.48 | **0.62** | ✅ **大幅超过 +30%** |
-| HD95 ↓ | 120.6 | **69.4** | ✅ **大幅超过 -42%** |
+| MSE ↓ | **0.57** | 0.97 | ❌ 1.7x gap (从 2.1x 缩小) |
+| LPIPS ↓ | **0.08** | 0.12 | ❌ 1.5x gap |
+| SSIM_tumor ↑ | 0.43 | **0.49** | ✅ +14% |
+| Dice ↑ | 0.48 | **0.57** | ✅ +18% |
+| HD95 ↓ | 120.6 | **108.5** | ✅ -10% |
 
-⚠️ Test set 不同，仅作方向参考。
-✅ Tumor 区域指标 (SSIM, Dice, HD95) 全面超过 GC #1。
-❌ 全图指标 (MSE, LPIPS) 仍有差距，主要来源是 intensity calibration。
+⚠️ Test set 不同，仅作方向参考。Tumor 相关指标全面超过 GC #1。
+
+### Final Submission Pipeline
+
+```
+Input .mha
+  → Dataset930 (BreastDivider 2D) → breast_mask
+  → Dataset910 (10-class) → heart_mask (label=7)
+  → Dataset940 (T1w Tumor Seg) → tumor_mask (预留)
+  → Per-image z-score normalize (breast foreground)
+  → Pix2PixHD v32_vflip (1ch, ngf=64, blocks=12) × 2 (hflip TTA)
+  → De-normalize
+  → Composite: breast=synthetic, heart=pre+offset, bg=pre
+  → Output .mha
+```
 
 ### 技术路线总结
 
 ```
-v14 (baseline) → v22 (deeper) → v26 (wider) → v31 (per-image norm) → v32 (conditional GAN)
-     Dice 0.70       0.72          0.73          0.57*               0.62*
-                                                 (* different test set)
+v14 (breast mask) → v22 (deeper) → v31 (per-image norm) → v32_vflip (+ vflip aug)
+     Dice 0.70         0.72           0.54*                   0.55*
+                                                               ↓ + postprocessing
+                                                          v32 Final: 0.57* (MSE 0.97)
+                                                          (* data_multislice_v3 test)
 ```
 
 关键技术贡献:
-1. **Per-image z-score normalization** — 消除 scanner 差异 (v31)
-2. **T1w tumor segmentation** — 从 pre-contrast 定位 tumor (Dice=0.68)
-3. **3-channel conditional GAN** — 显式 tumor 位置指导增强 (v32)
-4. **Gaussian blur composite** — 平滑 mask 边界 (HD95 -12%)
-5. **hflip TTA** — 零成本 SSIM/FRD 提升 (v32 final)
+1. **Per-image z-score normalization** — 消除 scanner 差异，LPIPS -28% (v31)
+2. **Vertical flip augmentation** — HD95 -56%, Dice +49% vs 基线 (v32)
+3. **Heart adaptive offset** — MSE -17.8%, 只改心脏区域不伤 Dice
+4. **hflip TTA** — SSIM +4%, FRD -6%, Dice +2%（推理时 2x）
 
 ### Active / Failed Experiments Summary
 
 | 方案 | 状态 | 结论 |
 |------|:---:|------|
 | Per-image norm (v31) | ✅ | 核心创新，所有后续版本都用 |
-| T1w Tumor Seg + Conditional GAN (v32) | ✅ | Supervisor 方案，Dice +9%, HD95 -32% |
-| Gaussian blur composite | ✅ | HD95 -12% |
-| hflip TTA | ✅ | SSIM +3%, FRD -5% |
-| Wider network ngf=96 (v26) | ✅ | MSE 最佳，但 Dice 不如 v32 |
+| Vflip augmentation (v32) | ✅ | HD95 大幅改善 |
+| Heart offset (D910 label=7) | ✅ | MSE -17.8%，Dice 仅 -1% |
+| hflip TTA | ✅ | 综合提升，推理时零训练代价 |
+| tumor_weight=20 + MSSC=100 (v31_auroc) | ✅ | Dice 最佳单模型 |
+| v33 (合并 vflip + auroc loss) | ⏳ | 训练中 |
+| v33b (+ ngf=96) | ⏳ | 训练中 |
 | SDEdit refiner on v31 | ❌ | per-image norm 与 diffusion 不兼容 |
 | UC-GAN uncertainty (v28) | ❌ | 全面退步 |
 | Swin Transformer (v29) | ❌ | 改善不显著 |
-| Semi-Disentangled INR (v30) | ❌ | 计算成本过高 (1 epoch=24h) |
+| Semi-Disentangled INR (v30) | ❌ | 计算成本过高 |
+| 全背景 adaptive offset | ❌ | MSE -18% 但 Dice -7%（太粗糙） |
+| Huber loss + GT clip (v31b) | ❌ | Dice 崩溃 |
 | Spatial weighting (v27) | ❌ | 改善 SSIM 但损害 MSE |
 | 增大 VGG loss (lambda_vgg=20) | ❌ | 不能改善 LPIPS |
 | Huber loss | ❌ | MSE 最低但 Dice 崩溃 |
