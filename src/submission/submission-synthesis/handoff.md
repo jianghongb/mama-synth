@@ -2311,6 +2311,65 @@ input (global z-score) → breast mask → per-image mean/std
 
 ---
 
+## 30f. Adaptive Background Offset 实验 (2026-07-09)
+
+**动机**: GT 是 post-contrast 全图，造影剂让心脏血池明显高亮。但 prediction 在 breast mask 外保留 pre-contrast 值（心脏不亮），导致背景区域产生大的 MSE 贡献。
+
+### 背景增强量化 (50 cases)
+
+| 区域 | GT - Pre offset | 说明 |
+|------|:---:|------|
+| 低强度背景 (air/muscle/fat) | 0.017 | 几乎不增强 |
+| 高强度背景 (heart/vessels) | **0.82** | 强增强（血池中造影剂） |
+| 所有背景平均 | 0.27 | 被心脏拉高 |
+| 当前 BACKGROUND_OFFSET | 0.17 | 不足 |
+
+### 策略对比
+
+| Strategy | MSE | vs baseline |
+|----------|:---:|:---:|
+| no offset (baseline) | 1.215 | — |
+| fixed 0.17 | 1.167 | -3.9% |
+| fixed 0.27 | 1.159 | -4.6% |
+| adaptive `where(pre>0, 0.8, 0.02)` | 1.051 | -13.5% |
+| **adaptive_smooth `clip((pre+0.2)*0.8, 0, 2.0)`** | **0.987** | **-18.8%** |
+| Oracle (GT offset) | 0.471 | -61.2% (上界) |
+
+### 最佳策略完整评估 (v32 + adaptive offset)
+
+| 指标 | v32 (无 offset) | v32 + adaptive offset | 变化 |
+|------|:---:|:---:|------|
+| **MSE ↓** | 1.215 | **0.987** | ✅ **-18.8%** 首次 <1.0 |
+| LPIPS ↓ | **0.117** | 0.118 | ≈ 持平 |
+| SSIM_tumor ↑ | **0.475** | 0.475 | 持平 |
+| FRD ↓ | 28.48 | 28.48 | 持平 |
+| Dice ↑ | **0.554** | 0.517 | ❌ -6.7% |
+| HD95 ↓ | **104.9** | 126.9 | ❌ +21% |
+
+### 分析
+
+- ✅ MSE 大幅下降，首次突破 1.0
+- ❌ Dice/HD95 恶化：adaptive offset 在背景加了强度（包括胸壁肌肉），nnUNet 在背景区域检测到假阳性肿瘤
+
+### 失败根因
+
+offset 公式 `clip((pre+0.2)*0.8, 0, 2.0)` 对**所有**背景像素按 intensity 比例加增强。但胸壁肌肉 intensity 也不低（pre ≈ 0-0.5），被加了 0.2-0.5 的 offset 后看起来像增强组织 → nnUNet false positive → Dice 下降。
+
+### 改进方向
+
+需要**只对心脏血池**加 offset，不影响胸壁肌肉：
+1. 用 Dataset910 label=7 精确定位心脏区域
+2. 更严格的阈值：只对 pre > 1.0 的像素加 offset（心脏血池在 T1w 上高信号）
+3. 训练时去掉 breast mask loss masking，让模型学全图增强（根本解决）
+
+### 结论
+
+Adaptive offset 对 MSE 有巨大帮助（-18.8%），但当前实现太粗糙导致 Dice 恶化。如果能精确定位心脏（Dataset910 label=7），只对心脏区域加 offset ≈ 0.8，可以同时改善 MSE 而不伤害 Dice。
+
+**状态**: ✅ 实验完成 — 方向有价值，需要更精确的心脏定位
+
+---
+
 ## 29. v31: Swin + UC-GAN Combined (备用)
 
 **动机**: 合并 v28 (UC-GAN uncertainty) 和 v29 (Swin Transformer bottleneck)。

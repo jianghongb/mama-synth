@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """MAMA-SYNTH Grand Challenge – Docker inference entry point.
 
-Two-stage pipeline:
-  Stage 1: Pix2PixHD GAN → coarse synthesis (~1s)
-  Stage 2 (optional): SDEdit diffusion refinement → sharper tumor boundaries (~5-8s)
+Pipeline:
+  Stage 1: Per-image z-score normalization (breast foreground)
+  Stage 2: Pix2PixHD GAN → coarse synthesis (~1s)
+  Stage 3 (optional): SDEdit diffusion refinement (~5-8s)
+  Stage 4: De-normalize + heart region adaptive offset (Dataset910 label=7)
 
 If refiner weights are not found, falls back to GAN-only (backward compatible).
+If Dataset910 weights are not found, skips heart offset.
 
 Grand Challenge I/O contract:
   Input:  /input/images/pre-contrast-dce-mri-slice-breast/<uuid>.mha
@@ -29,6 +32,7 @@ OUTPUT_SLUG = "synthetic-contrast-dce-mri-slice-breast"
 WEIGHTS_PATH = os.environ.get("MAMA_WEIGHTS_PATH", "/opt/app/weights/latest_net_G.pth")
 REFINER_PATH = os.environ.get("MAMA_REFINER_PATH", "/opt/app/weights/refiner_latest.pth")
 RESREFINER_PATH = os.environ.get("MAMA_RESREFINER_PATH", "/opt/app/weights/resrefiner_latest.pth")
+BREAST_SEG_PATH = os.environ.get("MAMA_BREAST_SEG_PATH", "/opt/app/weights/breast_seg")
 MODEL_SIZE = 512
 
 # SDEdit parameters
@@ -72,6 +76,61 @@ def build_residual_refiner(device):
     resrefiner.to(device).eval()
     print(f"Residual refiner loaded from {RESREFINER_PATH}")
     return resrefiner
+
+
+def build_breast_seg(device):
+    """Load Dataset910 nnUNet for 10-class breast segmentation (includes heart=7).
+
+    Returns predictor or None if weights not found.
+    """
+    if not Path(BREAST_SEG_PATH).exists():
+        print(f"Breast seg model not found at {BREAST_SEG_PATH}, skipping heart offset")
+        return None
+    os.environ.setdefault("nnUNet_raw", "/tmp/nnunet_raw")
+    os.environ.setdefault("nnUNet_preprocessed", "/tmp/nnunet_preprocessed")
+    os.environ.setdefault("nnUNet_results", "/tmp/nnunet_results")
+    from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
+
+    predictor = nnUNetPredictor(
+        tile_step_size=0.5, use_gaussian=True, use_mirroring=False,
+        perform_everything_on_device=True, device=device,
+        verbose=False, allow_tqdm=False,
+    )
+    predictor.initialize_from_trained_model_folder(
+        BREAST_SEG_PATH, use_folds=(0,), checkpoint_name="checkpoint_best.pth",
+    )
+    print(f"Breast seg (Dataset910) loaded from {BREAST_SEG_PATH}")
+    return predictor
+
+
+def predict_segmentation(predictor, slice_2d):
+    """Run nnUNet 10-class prediction, return full label map."""
+    props = {
+        "sitk_stuff": {
+            "spacing": (1.0, 1.0, 1.0),
+            "origin": (0.0, 0.0, 0.0),
+            "direction": (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0),
+        },
+        "spacing": [1.0, 1.0, 1.0],
+    }
+    input_arr = slice_2d[np.newaxis, np.newaxis, :, :]
+    pred = predictor.predict_single_npy_array(input_arr, props, None, None, False)
+    while pred.ndim > 2:
+        pred = pred[0]
+    return pred
+
+
+def get_masks_from_segmentation(seg_map):
+    """Extract breast mask and heart mask from 10-class segmentation.
+
+    Labels: 0=bg, 1=tissue, 2=vessel, 3=muscle, 4=bone,
+            5=lesion, 6=lymphnode, 7=heart, 8=liver, 9=implant
+    Breast = {1, 2, 5, 6, 9}
+    Heart = {7}
+    """
+    breast_mask = np.isin(seg_map, [1, 2, 5, 6, 9]).astype(np.float32)
+    heart_mask = (seg_map == 7).astype(np.float32)
+    return breast_mask, heart_mask
 
 
 def cosine_alpha_bar(T, s=0.008):
@@ -153,6 +212,7 @@ def main():
     netG = build_generator(device)
     resrefiner = build_residual_refiner(device)
     refiner = build_refiner(device) if resrefiner is None else None
+    breast_seg = build_breast_seg(device)
 
     input_file = find_input_image()
     print(f"Input: {input_file}")
@@ -162,8 +222,37 @@ def main():
     sl = arr.squeeze()
     orig_h, orig_w = sl.shape
 
+    # === Get breast mask and heart mask ===
+    if breast_seg is not None:
+        seg_map = predict_segmentation(breast_seg, sl)
+        breast_mask, heart_mask = get_masks_from_segmentation(seg_map)
+        # Dilate heart mask slightly (segmentation boundaries can be tight)
+        from scipy.ndimage import binary_dilation
+        heart_mask = binary_dilation(heart_mask, iterations=3).astype(np.float32)
+    else:
+        # Fallback: threshold-based breast mask, no heart mask
+        breast_mask_path = os.environ.get("MAMA_BREAST_MASK_PATH", "")
+        if breast_mask_path and Path(breast_mask_path).exists():
+            bm = sitk.GetArrayFromImage(sitk.ReadImage(breast_mask_path)).astype(np.float32).squeeze()
+            breast_mask = (bm > 0).astype(np.float32)
+        else:
+            breast_mask = (sl > -0.3).astype(np.float32)
+        heart_mask = np.zeros_like(sl)
+
+    # === Per-image z-score normalization (breast foreground) ===
+    fg_pixels = sl[breast_mask > 0.5]
+    if fg_pixels.size > 100:
+        img_mean = float(fg_pixels.mean())
+        img_std = float(fg_pixels.std())
+        img_std = max(img_std, 1e-8)
+    else:
+        img_mean, img_std = 0.0, 1.0
+
+    # Normalize using per-image stats
+    sl_norm = (sl - img_mean) / img_std * breast_mask  # zero background
+
     # Resize to 512×512
-    t = torch.from_numpy(sl).unsqueeze(0).unsqueeze(0).to(device)
+    t = torch.from_numpy(sl_norm).unsqueeze(0).unsqueeze(0).to(device)
     if orig_h != MODEL_SIZE or orig_w != MODEL_SIZE:
         t = torch.nn.functional.interpolate(t, size=(MODEL_SIZE, MODEL_SIZE), mode='bilinear', align_corners=False)
     pre_512 = t
@@ -191,7 +280,22 @@ def main():
         result_512 = torch.nn.functional.interpolate(result_512, size=(orig_h, orig_w),
                                                      mode='bilinear', align_corners=False)
 
-    result = result_512[0, 0].cpu().numpy().astype(np.float32)
+    result_norm = result_512[0, 0].cpu().numpy().astype(np.float32)
+
+    # === De-normalize: convert back to global z-score space ===
+    result = result_norm * img_std + img_mean
+
+    # === Composite: breast + heart offset + background ===
+    # Heart region: adaptive offset proportional to pre-contrast intensity
+    # (contrast agent pools in heart blood → strong enhancement in GT)
+    heart_bg = heart_mask * (1 - breast_mask)  # heart outside breast only
+    heart_offset = np.clip(sl * 1.0, 0, 4.0) * heart_bg
+
+    # Final composite:
+    #   breast region → de-normalized model output
+    #   heart region  → pre-contrast + adaptive offset
+    #   other background → pre-contrast (unchanged)
+    result = breast_mask * result + (1 - breast_mask) * sl + heart_offset
 
     # Restore original ndim
     if arr.ndim == 3:
