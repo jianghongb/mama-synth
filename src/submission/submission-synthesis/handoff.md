@@ -16,8 +16,7 @@
 
 ### Current Recommendation
 - **🏆 最终提交**: v32 Final — 1ch GAN + D930 breast + D910 heart offset + hflip TTA
-- **训练中**: v33 (vflip + tumor_weight=20 + MSSC=100), v33b (+ ngf=96)
-- **不采用**: SDEdit refiner (失败), UC-GAN (失败), Swin (无效), 全背景 offset (Dice 崩溃)
+- **不采用**: v33 (Dice -10%), SDEdit refiner (失败), UC-GAN (失败), Swin (无效), 全背景 offset (Dice 崩溃)
 
 ### vs GC Validation #1 (MamoAnd)
 
@@ -70,7 +69,7 @@ v14 (breast mask) → v22 (deeper) → v31 (per-image norm) → v32_vflip (+ vfl
 | Heart offset (D910 label=7) | ✅ | MSE -17.8%，Dice 仅 -1% |
 | hflip TTA | ✅ | 综合提升，推理时零训练代价 |
 | tumor_weight=20 + MSSC=100 (v31_auroc) | ✅ | Dice 最佳单模型 |
-| v33 (合并 vflip + auroc loss) | ⏳ | 训练中 |
+| v33 (合并 vflip + auroc loss) | ❌ | Dice -10%, vflip 在 3ch conditional 上有害 |
 | v33b (+ ngf=96) | ⏳ | 训练中 |
 | SDEdit refiner on v31 | ❌ | per-image norm 与 diffusion 不兼容 |
 | UC-GAN uncertainty (v28) | ❌ | 全面退步 |
@@ -86,18 +85,24 @@ v14 (breast mask) → v22 (deeper) → v31 (per-image norm) → v32_vflip (+ vfl
 
 ```
 Docker container (~5 GB)
-├── inference.py          ← v32 final pipeline (blur + hflip TTA)
+├── inference.py          ← v32 Final pipeline (1ch GAN + heart offset + hflip TTA)
 ├── weights/
-│   ├── latest_net_G.pth  ← v32 conditional GAN (730 MB)
-│   ├── breast_seg/       ← Dataset930 BreastDivider 2D (120 MB)
-│   └── tumor_seg/        ← Dataset940 T1w Tumor Seg (120 MB)
+│   ├── latest_net_G.pth  ← v32_vflip GAN (912 MB, input_nc=1, ngf=64, n_blocks=12)
+│   ├── breast_seg_930/   ← Dataset930 BreastDivider 2D (120 MB)
+│   ├── breast_seg_910/   ← Dataset910 10-class (for heart label=7) (710 MB)
+│   └── tumor_seg/        ← Dataset940 T1w Tumor Seg (120 MB, 预留)
 └── models/networks.py
 ```
+
+**注意**: 当前提交用 v32_vflip (1ch)，不是 v32_conditional (3ch)。
+- v32_conditional (3ch) Dice 更高 (0.624) 但需要 tumor mask 在 input
+- v32_vflip (1ch) + heart offset MSE 更低 (0.970) 且 pipeline 更简单
+- 正在验证 v32_final_combined (3ch + heart offset) 是否两全其美
 
 推理时间: ~8s/case (T4 GPU), 容器 < 10 GB。
 
 ### Active Experiments
-- **v33 (next)**: v31_auroc + vflip = tumor_weight=20 + MSSC=100 + no GT clip + vflip augmentation — 合并 v31_auroc 和 v32_vflip 的优势
+- ~~**v33 (next)**: v31_auroc + vflip = tumor_weight=20 + MSSC=100 + no GT clip + vflip augmentation~~ → ❌ 完成，Dice 退步 10%，不采用
 - v26 + pinorm: 大网络 + per-image norm — 预期降低 MSE
 
 ### Quick Reference
@@ -1381,14 +1386,18 @@ VRAM estimate (train bs=8): ~42 GB — A100 OK
 | v25 (uncertainty) | 网络预测不确定性 | gate 本质上就是"增强确定性"的 proxy |
 | INR (原始 INR 项目) | SIREN + FiLM, per-pixel 坐标 | 用 CNN 替代 INR 解码（更快，更适合 2D） |
 
-### 状态: ⏳ 待训练
+### 状态: ❌ 放弃 (计算成本过高)
 
-### 后续计划
+**训练结果**: 仅完成 1 epoch，耗时 24 小时 (~8.8s/iteration)。200 epochs 需 ~200 天，48h SLURM 时限内无法完成。架构设计验证通过（gate 机制有效），但训练不可行。
 
-1. 训练完成后对比 v22/v26 → 确认解耦是否带来 MSE/Dice 提升
-2. 如果 gate map 合理 (肿瘤区域亮，正常组织暗) → 尝试 gate 作为 soft attention 用于 ensemble
-3. v30 + SDEdit refiner (v31?) → 在 gate 区域内做 diffusion 精修
-4. 如果 v30 base 好于 v26 → 做 K-Fold v30 ensemble
+### 后续计划（已废弃）
+
+~~1. 训练完成后对比 v22/v26 → 确认解耦是否带来 MSE/Dice 提升~~
+~~2. 如果 gate map 合理 → 尝试 gate 作为 soft attention 用于 ensemble~~
+~~3. v30 + SDEdit refiner (v31?) → 在 gate 区域内做 diffusion 精修~~
+~~4. 如果 v30 base 好于 v26 → 做 K-Fold v30 ensemble~~
+
+**替代方案**: v31_pinorm 的 per-image norm 实现了类似的 "anatomy-lock" 效果（breast 外不变），且零额外计算开销。v32_conditional 通过 tumor mask input 实现了类似的 "gated enhancement" 效果。
 
 ---
 
@@ -1511,61 +1520,7 @@ VRAM estimate (train bs=8): ~42 GB — A100 OK
 
 ## 27. v30: Semi-Disentangled INR-inspired Generator (SD-INR)
 
-**动机**: 分解合成为 anatomy-lock + gated enhancement，灵感来自 INR 的坐标→强度映射。
-
-**核心公式**:
-```
-output = pre + gate(x,y) × enhancement(x,y)
-```
-- `SharedEncoder`: 从 pre-contrast 提取特征
-- `EnhancementDecoder` (重, skip connections): 预测强度增量 Δ
-- `GateDecoder` (轻, smooth): 预测空间注意力 [0,1]
-- `breast_mask` 硬约束: gate=0 outside breast
-
-**预期优势**:
-- 无背景幻觉 (gate × breast_mask 杀死胸壁区域)
-- 更好的 tumor 保真度 (所有容量集中在 enhancement)
-- 更低的 MSE 方差 (anatomy lock 消除强度漂移)
-
-**配置**:
-| 参数 | 值 |
-|---|---|
-| 训练脚本 | `train_semi_disentangled.py` |
-| ngf | 96 |
-| n_downsampling | 4 |
-| n_encoder_blocks | 9 |
-| n_enhance_blocks | 3 |
-| n_gate_blocks | 2 |
-| data | data_multislice_v2/train |
-| breast_mask | ✅ (hard constraint) |
-| batchSize | 8 |
-| epochs | 200 |
-
-**Loss**:
-| Loss | λ |
-|---|---|
-| enhance_l1 | 10.0 |
-| anatomy | 5.0 |
-| gate_sparsity | 0.5 |
-| gate_tv | 0.1 |
-| tumor | 10.0 |
-| vgg | 10.0 |
-| gan | 1.0 |
-| feat | 10.0 |
-| mssc | 50.0 |
-
-**脚本**: `berzelius_train_v30_sdinr.sh`
-
-**状态**: ❌ 放弃
-
-**训练结果**:
-- 仅完成 **1 epoch**，耗时 **24 小时**（~8.8s/iteration）
-- 原因: SD-INR 每次 iteration 需要 GAN forward + diffusion 多步去噪 + score distillation gradient
-- 200 epochs 需 ~200 天，48h SLURM 时限内无法完成
-- 权重已下载到本地但仅 1 epoch，未达到收敛，不具备评估价值
-
-**结论**: SD-INR 架构计算成本过高，不适合当前资源限制。
-如需类似效果（anatomy-lock + gated enhancement），建议用 v31_pinorm 的 per-image norm 替代（功能类似但零额外计算开销）。
+→ **详见 Section 25**。已合并。状态: ❌ 放弃 (1 epoch = 24h，计算不可行)。
 
 ---
 
@@ -2320,6 +2275,7 @@ input (global z-score) → breast mask → per-image mean/std
 ### 下一步
 
 **合并两者** — v33: tumor_weight=20 + MSSC=100 + 去 GT clip + vflip → 预期 Dice 和 HD95 同时最优。
+**实际结果**: ❌ v33 在 3ch conditional 上 Dice -10%, HD95 +62%。vflip 对 conditional model 有害。
 
 **状态**: ✅ 完成 — **提交候选**（HD95 最优版本）
 
@@ -2560,6 +2516,7 @@ Input → Encoder (4× downsample)
 **下一步: v33** — 合并 v31_auroc + v32_vflip:
 - tumor_weight=20, MSSC=100, no GT clip, + vflip augmentation
 - 预期同时获得 v31_auroc 的 Dice 和 v32_vflip 的 HD95
+- **实际结果 (2026-07-10)**: ❌ 失败。vflip 在 3ch conditional 上有害 (Dice 0.562 vs 0.621)。v32_cond_blur 不需要额外改动。
 
 ---
 
@@ -2722,6 +2679,44 @@ input = concat(pre_contrast, breast_mask, predicted_tumor_mask)  # [B, 3, H, W]
 | v31 (当前最佳) | 1ch: pre | ❌ 全靠自己学 |
 | v24 (mask-as-input) | 2ch: pre + breast_mask | ❌ 只知道乳腺边界 |
 | **v32 (supervisor)** | **3ch: pre + breast + tumor** | **✅ 显式告知** |
+
+---
+
+## 30h. v33_vflip_auroc: Conditional + vflip + auroc loss (2026-07-10)
+
+**动机**: 合并 v32_conditional_blur (3ch, Dice 0.621) 和 v31_auroc (tumor_weight=20, MSSC=100) 的优势，加上 vflip augmentation。
+
+**配置** (对比 v32_conditional_blur):
+
+| 参数 | v32_cond_blur | v33_vflip_auroc |
+|------|:---:|:---:|
+| input_nc | 3 (pre + breast + tumor) | 3 (pre + breast + tumor) |
+| tumor_weight | 10 | **20** (2×) |
+| lambda_mssc | 50 | **100** (2×) |
+| vflip | ❌ | **✅** |
+| blur composite | ✅ (σ=5) | ✅ (σ=5) |
+| 其余 | — | 同 v32_cond |
+
+**结果 (data_multislice_v3/test, 299 cases)**:
+
+| Metric | v32_cond_blur (基线) | v33_vflip_auroc | 变化 |
+|--------|:---:|:---:|------|
+| MSE ↓ | 1.158 | **1.149** | ✅ -1% |
+| LPIPS ↓ | 0.122 | **0.118** | ✅ -3% |
+| SSIM_tumor ↑ | **0.492** | 0.463 | ❌ -6% |
+| FRD ↓ | **28.26** | 28.66 | ❌ +1.4% |
+| Dice ↑ | **0.621** | 0.562 | ❌ -10% |
+| HD95 ↓ | **67.3** | 108.9 | ❌ +62% |
+
+**分析**:
+- MSE/LPIPS 微弱改善，但 Dice/HD95/SSIM 全线大幅退步
+- vflip augmentation 在 conditional 模型上有害 — tumor mask 通道翻转后位置信息矛盾
+- tumor_weight/MSSC 加倍在已有 explicit tumor mask input 时过度加权，导致过拟合
+- 在 1ch 模型上有效的改动 (v31_auroc) 不能直接迁移到 3ch conditional 模型
+
+**结论**: ❌ v32_conditional_blur 已是 3ch 系列最优，不需要额外 loss 调整或 vflip。
+
+**状态**: ✅ 完成 — 不采用
 
 ---
 
