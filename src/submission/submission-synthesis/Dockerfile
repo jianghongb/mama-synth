@@ -23,7 +23,7 @@ COPY --chown=user:user models/networks.py ./models/networks.py
 COPY --chown=user:user models/__init__.py ./models/__init__.py
 
 # Inference entry point
-COPY --chown=user:user inference_v32.py ./inference.py
+COPY --chown=user:user inference.py ./inference.py
 
 # Weights: Pix2PixHD GAN (v32_vflip, 912 MB)
 COPY --chown=user:user weights/latest_net_G.pth ./weights/latest_net_G.pth

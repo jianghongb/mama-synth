@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""MAMA-SYNTH Grand Challenge – Docker inference entry point.
+"""MAMA-SYNTH Grand Challenge – Final Submission Inference.
 
 Pipeline:
-  Stage 1: Per-image z-score normalization (breast foreground)
-  Stage 2: Pix2PixHD GAN → coarse synthesis (~1s)
-  Stage 3 (optional): SDEdit diffusion refinement (~5-8s)
-  Stage 4: De-normalize + heart region adaptive offset (Dataset910 label=7)
-
-If refiner weights are not found, falls back to GAN-only (backward compatible).
-If Dataset910 weights are not found, skips heart offset.
+  1. Dataset930 (BreastDivider 2D) → breast_mask (binary)
+  2. Dataset910 (10-class) → heart_mask (label=7)
+  3. Per-image z-score normalize (breast foreground)
+  4. Pix2PixHD GAN with hflip TTA (2x inference, averaged)
+  5. De-normalize back to global z-score space
+  6. Composite: breast=synthetic, heart=pre+adaptive_offset, other_bg=pre
 
 Grand Challenge I/O contract:
   Input:  /input/images/pre-contrast-dce-mri-slice-breast/<uuid>.mha
@@ -16,75 +15,52 @@ Grand Challenge I/O contract:
 """
 import os
 import sys
+from functools import partial
 from pathlib import Path
 
-import torch
 import numpy as np
 import SimpleITK as sitk
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 sys.path.insert(0, os.path.dirname(__file__))
 from models.networks import GlobalGenerator
 
+# === Paths ===
 INPUT_PATH = Path(os.environ.get("MAMA_INPUT_DIR", "/input"))
 OUTPUT_PATH = Path(os.environ.get("MAMA_OUTPUT_DIR", "/output"))
 INPUT_SLUG = "pre-contrast-dce-mri-slice-breast"
 OUTPUT_SLUG = "synthetic-contrast-dce-mri-slice-breast"
-WEIGHTS_PATH = os.environ.get("MAMA_WEIGHTS_PATH", "/opt/app/weights/latest_net_G.pth")
-REFINER_PATH = os.environ.get("MAMA_REFINER_PATH", "/opt/app/weights/refiner_latest.pth")
-RESREFINER_PATH = os.environ.get("MAMA_RESREFINER_PATH", "/opt/app/weights/resrefiner_latest.pth")
-BREAST_SEG_PATH = os.environ.get("MAMA_BREAST_SEG_PATH", "/opt/app/weights/breast_seg")
-MODEL_SIZE = 512
 
-# SDEdit parameters
-SDEDIT_STRENGTH = float(os.environ.get("MAMA_SDEDIT_STRENGTH", "0.3"))
-DDIM_STEPS = int(os.environ.get("MAMA_DDIM_STEPS", "20"))
+WEIGHTS_PATH = os.environ.get("MAMA_WEIGHTS_PATH", "/opt/app/weights/latest_net_G.pth")
+BREAST_SEG_PATH = os.environ.get("MAMA_BREAST_SEG_PATH",
+                                  "/opt/app/weights/breast_seg_930")
+HEART_SEG_PATH = os.environ.get("MAMA_HEART_SEG_PATH",
+                                 "/opt/app/weights/breast_seg_910")
+
+MODEL_SIZE = 512
+NGF = int(os.environ.get("MAMA_NGF", "64"))
+N_BLOCKS = int(os.environ.get("MAMA_N_BLOCKS", "12"))
 
 
 def build_generator(device):
-    from functools import partial
-    import torch.nn as nn
+    """Load Pix2PixHD generator (1-channel input, per-image norm, residual mode)."""
     norm_layer = partial(nn.InstanceNorm2d, affine=False)
     netG = GlobalGenerator(
-        input_nc=1, output_nc=1, ngf=64,
-        n_downsampling=4, n_blocks=9,
-        norm_layer=norm_layer, residual_mode=True
+        input_nc=1, output_nc=1, ngf=NGF,
+        n_downsampling=4, n_blocks=N_BLOCKS,
+        norm_layer=norm_layer, residual_mode=True,
     )
     netG.load_state_dict(torch.load(WEIGHTS_PATH, map_location=device))
     netG.to(device).eval()
     return netG
 
 
-def build_refiner(device):
-    """Load diffusion refiner if weights exist, otherwise return None."""
-    if not Path(REFINER_PATH).exists():
-        return None
-    from models.refiner_network import RefinerUNet
-    refiner = RefinerUNet(in_ch=3, out_ch=1, base_ch=64, ch_mult=(1, 2, 4, 4))
-    refiner.load_state_dict(torch.load(REFINER_PATH, map_location=device))
-    refiner.to(device).eval()
-    print(f"Diffusion refiner loaded from {REFINER_PATH}")
-    return refiner
-
-
-def build_residual_refiner(device):
-    """Load residual refiner if weights exist, otherwise return None."""
-    if not Path(RESREFINER_PATH).exists():
-        return None
-    from models.train_residual_refiner import ResidualRefiner
-    resrefiner = ResidualRefiner(base_ch=64)
-    resrefiner.load_state_dict(torch.load(RESREFINER_PATH, map_location=device))
-    resrefiner.to(device).eval()
-    print(f"Residual refiner loaded from {RESREFINER_PATH}")
-    return resrefiner
-
-
-def build_breast_seg(device):
-    """Load Dataset910 nnUNet for 10-class breast segmentation (includes heart=7).
-
-    Returns predictor or None if weights not found.
-    """
-    if not Path(BREAST_SEG_PATH).exists():
-        print(f"Breast seg model not found at {BREAST_SEG_PATH}, skipping heart offset")
+def build_nnunet_predictor(model_path, device, checkpoint="checkpoint_best.pth"):
+    """Load an nnUNet predictor from a trained model folder."""
+    if not Path(model_path).exists():
+        print(f"WARNING: Model not found at {model_path}")
         return None
     os.environ.setdefault("nnUNet_raw", "/tmp/nnunet_raw")
     os.environ.setdefault("nnUNet_preprocessed", "/tmp/nnunet_preprocessed")
@@ -97,14 +73,13 @@ def build_breast_seg(device):
         verbose=False, allow_tqdm=False,
     )
     predictor.initialize_from_trained_model_folder(
-        BREAST_SEG_PATH, use_folds=(0,), checkpoint_name="checkpoint_best.pth",
+        model_path, use_folds=(0,), checkpoint_name=checkpoint,
     )
-    print(f"Breast seg (Dataset910) loaded from {BREAST_SEG_PATH}")
     return predictor
 
 
-def predict_segmentation(predictor, slice_2d):
-    """Run nnUNet 10-class prediction, return full label map."""
+def predict_seg(predictor, slice_2d):
+    """Run nnUNet prediction on a 2D slice, return label map."""
     props = {
         "sitk_stuff": {
             "spacing": (1.0, 1.0, 1.0),
@@ -120,84 +95,8 @@ def predict_segmentation(predictor, slice_2d):
     return pred
 
 
-def get_masks_from_segmentation(seg_map):
-    """Extract breast mask and heart mask from 10-class segmentation.
-
-    Labels: 0=bg, 1=tissue, 2=vessel, 3=muscle, 4=bone,
-            5=lesion, 6=lymphnode, 7=heart, 8=liver, 9=implant
-    Breast = {1, 2, 5, 6, 9}
-    Heart = {7}
-    """
-    breast_mask = np.isin(seg_map, [1, 2, 5, 6, 9]).astype(np.float32)
-    heart_mask = (seg_map == 7).astype(np.float32)
-    return breast_mask, heart_mask
-
-
-def cosine_alpha_bar(T, s=0.008):
-    """Precompute ᾱ schedule."""
-    steps = torch.arange(T + 1, dtype=torch.float64)
-    alpha_bar = torch.cos(((steps / T) + s) / (1 + s) * (np.pi / 2)) ** 2
-    alpha_bar = alpha_bar / alpha_bar[0]
-    return alpha_bar.float()
-
-
-@torch.no_grad()
-def sdedit_refine(refiner, gan_output, pre, device, strength=0.3, num_steps=20, T=1000, mask=None):
-    """SDEdit: add noise to GAN output, then denoise with DDIM.
-
-    Args:
-        refiner: RefinerUNet model
-        gan_output: (1, 1, H, W) GAN synthesis result
-        pre: (1, 1, H, W) pre-contrast input
-        strength: fraction of noise schedule to use (0.3 = start from t=300)
-        num_steps: DDIM sampling steps
-        mask: (1, 1, H, W) optional binary mask — only apply refinement inside mask
-    """
-    alpha_bar = cosine_alpha_bar(T).to(device)
-
-    # Determine starting timestep
-    t_start = int(T * strength)
-    if t_start == 0:
-        return gan_output
-
-    # Add noise to GAN output at t_start
-    ab = alpha_bar[t_start]
-    noise = torch.randn_like(gan_output)
-    x_t = torch.sqrt(ab) * gan_output + torch.sqrt(1 - ab) * noise
-
-    # DDIM sampling from t_start → 0
-    timesteps = torch.linspace(t_start, 0, num_steps + 1).long().to(device)
-
-    for i in range(num_steps):
-        t_cur = timesteps[i]
-        t_next = timesteps[i + 1]
-
-        # Predict noise
-        t_batch = t_cur.unsqueeze(0)
-        refiner_input = torch.cat([x_t, pre, gan_output], dim=1)
-        eps_pred = refiner(refiner_input, t_batch)
-
-        # DDIM deterministic update
-        ab_cur = alpha_bar[t_cur]
-        ab_next = alpha_bar[t_next] if t_next > 0 else torch.tensor(1.0, device=device)
-
-        # Predict x0
-        x0_pred = (x_t - torch.sqrt(1 - ab_cur) * eps_pred) / torch.sqrt(ab_cur)
-
-        # Step to t_next
-        if t_next > 0:
-            x_t = torch.sqrt(ab_next) * x0_pred + torch.sqrt(1 - ab_next) * eps_pred
-        else:
-            x_t = x0_pred
-
-    # If mask provided, only apply refinement inside mask
-    if mask is not None:
-        x_t = mask * x_t + (1 - mask) * gan_output
-
-    return x_t
-
-
 def find_input_image() -> Path:
+    """Find the input MHA file."""
     search_dir = INPUT_PATH / "images" / INPUT_SLUG
     candidates = list(search_dir.glob("*.mha"))
     if not candidates:
@@ -207,13 +106,17 @@ def find_input_image() -> Path:
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Device: {device}")
 
     # Load models
+    print("Loading models...")
     netG = build_generator(device)
-    resrefiner = build_residual_refiner(device)
-    refiner = build_refiner(device) if resrefiner is None else None
-    breast_seg = build_breast_seg(device)
+    breast_seg = build_nnunet_predictor(BREAST_SEG_PATH, device, "checkpoint_final.pth")
+    heart_seg = build_nnunet_predictor(HEART_SEG_PATH, device, "checkpoint_best.pth")
+    print(f"Generator: ngf={NGF}, n_blocks={N_BLOCKS}, residual_mode")
+    print("Models loaded.")
 
+    # Read input
     input_file = find_input_image()
     print(f"Input: {input_file}")
 
@@ -222,94 +125,66 @@ def main():
     sl = arr.squeeze()
     orig_h, orig_w = sl.shape
 
-    # === Get breast mask and heart mask ===
+    # === Step 1: Breast mask (Dataset930 - binary) ===
     if breast_seg is not None:
-        seg_map = predict_segmentation(breast_seg, sl)
-        breast_mask, heart_mask = get_masks_from_segmentation(seg_map)
-        # Dilate heart mask slightly (segmentation boundaries can be tight)
+        breast_pred = predict_seg(breast_seg, sl)
+        breast_mask = (breast_pred > 0).astype(np.float32)
+    else:
+        breast_mask = (sl > -0.3).astype(np.float32)
+
+    # === Step 2: Heart mask (Dataset910 - label 7) ===
+    if heart_seg is not None:
+        heart_pred = predict_seg(heart_seg, sl)
+        heart_mask = (heart_pred == 7).astype(np.float32)
+        # Dilate heart mask slightly
         from scipy.ndimage import binary_dilation
         heart_mask = binary_dilation(heart_mask, iterations=3).astype(np.float32)
     else:
-        # Fallback: threshold-based breast mask, no heart mask
-        breast_mask_path = os.environ.get("MAMA_BREAST_MASK_PATH", "")
-        if breast_mask_path and Path(breast_mask_path).exists():
-            bm = sitk.GetArrayFromImage(sitk.ReadImage(breast_mask_path)).astype(np.float32).squeeze()
-            breast_mask = (bm > 0).astype(np.float32)
-        else:
-            breast_mask = (sl > -0.3).astype(np.float32)
         heart_mask = np.zeros_like(sl)
 
-    # === Per-image z-score normalization (breast foreground) ===
+    # === Step 3: Per-image z-score normalize (breast foreground) ===
     fg_pixels = sl[breast_mask > 0.5]
     if fg_pixels.size > 100:
         img_mean = float(fg_pixels.mean())
-        img_std = float(fg_pixels.std())
-        img_std = max(img_std, 1e-8)
+        img_std = max(float(fg_pixels.std()), 1e-8)
     else:
         img_mean, img_std = 0.0, 1.0
 
-    # Normalize using per-image stats
     sl_norm = (sl - img_mean) / img_std * breast_mask  # zero background
 
-    # Resize to 512×512
-    t = torch.from_numpy(sl_norm).unsqueeze(0).unsqueeze(0).to(device)
-    if orig_h != MODEL_SIZE or orig_w != MODEL_SIZE:
-        t = torch.nn.functional.interpolate(t, size=(MODEL_SIZE, MODEL_SIZE), mode='bilinear', align_corners=False)
-    pre_512 = t
+    # === Step 4: GAN inference with hflip TTA ===
+    t = torch.from_numpy(sl_norm).unsqueeze(0).unsqueeze(0).float().to(device)
+    t = F.interpolate(t, size=(MODEL_SIZE, MODEL_SIZE), mode="bilinear", align_corners=False)
 
-    # Stage 1: Pix2PixHD
     with torch.no_grad():
-        gan_out = netG(pre_512)
+        out_1 = netG(t)
+        out_2 = netG(t.flip(-1)).flip(-1)
+        out_norm = (out_1 + out_2) / 2.0
 
-    # Stage 2: Refinement (if available)
-    if resrefiner is not None:
-        # Residual refiner: single forward pass, output = pre + Δ
-        with torch.no_grad():
-            result_512 = resrefiner(pre_512, gan_out)
-        mode = "residual"
-    elif refiner is not None:
-        result_512 = sdedit_refine(refiner, gan_out, pre_512, device,
-                                   strength=SDEDIT_STRENGTH, num_steps=DDIM_STEPS)
-        mode = "sdedit"
-    else:
-        result_512 = gan_out
-        mode = "gan_only"
+    # === Step 5: De-normalize ===
+    result_norm = F.interpolate(out_norm, size=(orig_h, orig_w), mode="bilinear", align_corners=False)
+    result_norm = result_norm[0, 0].cpu().numpy()
+    synthetic = result_norm * img_std + img_mean
 
-    # Resize back
-    if orig_h != MODEL_SIZE or orig_w != MODEL_SIZE:
-        result_512 = torch.nn.functional.interpolate(result_512, size=(orig_h, orig_w),
-                                                     mode='bilinear', align_corners=False)
-
-    result_norm = result_512[0, 0].cpu().numpy().astype(np.float32)
-
-    # === De-normalize: convert back to global z-score space ===
-    result = result_norm * img_std + img_mean
-
-    # === Composite: breast + heart offset + background ===
-    # Heart region: adaptive offset proportional to pre-contrast intensity
-    # (contrast agent pools in heart blood → strong enhancement in GT)
+    # === Step 6: Composite with heart offset ===
+    # Heart region: adaptive offset (contrast agent pools in heart blood)
     heart_bg = heart_mask * (1 - breast_mask)  # heart outside breast only
     heart_offset = np.clip(sl * 1.0, 0, 4.0) * heart_bg
 
-    # Final composite:
-    #   breast region → de-normalized model output
-    #   heart region  → pre-contrast + adaptive offset
-    #   other background → pre-contrast (unchanged)
-    result = breast_mask * result + (1 - breast_mask) * sl + heart_offset
-
-    # Restore original ndim
-    if arr.ndim == 3:
-        result = result[np.newaxis, ...]
+    # Final: breast=synthetic, background=pre, heart=pre+offset
+    result = breast_mask * synthetic + (1 - breast_mask) * sl + heart_offset
 
     # Write output
-    out_img = sitk.GetImageFromArray(result)
+    if arr.ndim == 3:
+        result = result[np.newaxis, ...]
+    out_img = sitk.GetImageFromArray(result.astype(np.float32))
     out_img.CopyInformation(img)
 
     out_dir = OUTPUT_PATH / "images" / OUTPUT_SLUG
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / "output.mha"
     sitk.WriteImage(out_img, str(out_file))
-    print(f"Output: {out_file}  shape={result.shape}  mode={mode}")
+    print(f"Output: {out_file}  shape={result.shape}")
 
 
 if __name__ == "__main__":
