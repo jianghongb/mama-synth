@@ -8,12 +8,11 @@
 
 | Rank | Version | MSE ↓ | LPIPS ↓ | SSIM ↑ | FRD ↓ | Dice ↑ | HD95 ↓ | Key Change |
 |:---:|---------|:-----:|:-------:|:------:|:-----:|:------:|:------:|------------|
-| 🥇 | **v32 final (blur+TTA)** | **1.127** | 0.123 | **0.509** | **27.06** | **0.624** | 69.4 | 3ch conditional + blur + hflip TTA |
-| 🥈 | v32 blur (no TTA) | 1.158 | 0.122 | 0.492 | 28.26 | 0.621 | **67.3** | HD95 最佳 |
-| 🥉 | v32 hard mask | 1.160 | **0.117** | 0.492 | 28.46 | 0.614 | 76.0 | LPIPS 最佳 |
-| 4 | v31_auroc | 1.193 | 0.118 | 0.476 | 28.31 | 0.565 | 112.1 | 1ch baseline (无 tumor mask) |
-| 5 | v32_vflip | 1.215 | 0.117 | 0.475 | 28.48 | 0.554 | 104.9 | per-image norm + vflip |
-| 6 | v31_tta_4flip | 1.168 | 0.124 | 0.518 | 22.99 | 0.531 | 143.8 | FRD 最佳 (TTA 8方向) |
+| 🥇 | **v32 Final (submission)** | **0.970** | **0.116** | **0.493** | **26.88** | **0.567** | 108.5 | D930 breast + D910 heart offset + hflip TTA |
+| 🥈 | v31_auroc | 1.193 | 0.118 | 0.476 | 28.31 | 0.565 | 112.1 | tumor_weight×2 + MSSC×2 |
+| 🥉 | v32_vflip (no postproc) | 1.215 | 0.117 | 0.475 | 28.48 | 0.554 | **104.9** | HD95 最佳 (无后处理) |
+| 4 | v32 + hflip TTA | 1.186 | 0.119 | 0.493 | 26.88 | 0.574 | 111.6 | TTA only, 无 heart offset |
+| 5 | v31_pinorm | 1.039 | 0.126 | 0.379 | 24.01 | 0.371 | 239.7 | MSE/FRD 最佳 (无后处理) |
 | 7 | v26_msv3 | 1.101 | 0.157 | 0.394 | 29.66 | 0.493 | 144.9 | Wider (ngf=96) |
 
 ### Current Recommendation
@@ -2367,6 +2366,81 @@ offset 公式 `clip((pre+0.2)*0.8, 0, 2.0)` 对**所有**背景像素按 intensi
 Adaptive offset 对 MSE 有巨大帮助（-18.8%），但当前实现太粗糙导致 Dice 恶化。如果能精确定位心脏（Dataset910 label=7），只对心脏区域加 offset ≈ 0.8，可以同时改善 MSE 而不伤害 Dice。
 
 **状态**: ✅ 实验完成 — 方向有价值，需要更精确的心脏定位
+
+---
+
+## 30g. v32 Final Submission Pipeline (2026-07-10) 🏆
+
+**动机**: 合并所有验证有效的 post-processing 改进到最终提交：Dataset930 breast mask（和训练一致）+ Dataset910 heart offset（降 MSE）+ hflip TTA（提升 Dice/SSIM/FRD）。
+
+### Pipeline
+
+```
+Input .mha
+  → Dataset930 nnUNet (binary) → breast_mask
+  → Dataset910 nnUNet (10-class, label=7) → heart_mask (dilated 3px)
+  → Per-image z-score normalize (breast foreground: mu, sigma)
+  → Pix2PixHD v32_vflip (ngf=64, blocks=12, residual) × 2 (hflip TTA average)
+  → De-normalize: synthetic = output_norm × sigma + mu
+  → Composite:
+      breast region → synthetic
+      heart region  → pre + clip(pre * 1.0, 0, 4.0)
+      other bg      → pre (unchanged)
+  → Output .mha
+```
+
+### 结果 (data_multislice_v3/test, 299 cases)
+
+| Metric | v32 (no offset) | v32 + heart (D910) | **v32 Final** | v31_auroc |
+|--------|:---:|:---:|:---:|:---:|
+| MSE ↓ | 1.215 | 0.999 | **0.970** ★ | 1.193 |
+| LPIPS ↓ | 0.117 | 0.115 | **0.116** | 0.118 |
+| SSIM ↑ | 0.475 | 0.475 | **0.493** ★ | 0.476 |
+| FRD ↓ | 28.48 | 28.48 | **26.88** ★ | 28.31 |
+| Dice ↑ | 0.554 | 0.548 | **0.567** ★ | 0.565 |
+| HD95 ↓ | **104.9** | 109.9 | 108.5 | 112.1 |
+
+### vs GC #1 对比
+
+| Metric | #1 MamoAnd | **v32 Final** | 差距 |
+|--------|:---:|:---:|------|
+| MSE ↓ | **0.57** | 0.97 | 1.7x (从 2.1x 缩小) |
+| LPIPS ↓ | **0.08** | 0.12 | 1.5x |
+| SSIM ↑ | 0.43 | **0.49** | ✅ +14% |
+| Dice ↑ | 0.48 | **0.57** | ✅ +18% |
+| HD95 ↓ | 120.6 | **108.5** | ✅ -10% |
+
+### 各组件贡献分析
+
+| 组件 | MSE 改善 | Dice 影响 | 来源 |
+|------|:---:|:---:|------|
+| hflip TTA | -2.4% | +2.4% | 2x 推理平均 |
+| Dataset930 breast (vs D910 breast) | ≈0 | 训练一致性 | 和训练时用的 mask 相同 |
+| Heart offset (D910 label=7) | **-17.8%** | -1% | 心脏区域 adaptive |
+| **总计** | **-20.2%** | **+2.4%** | |
+
+### Docker 提交
+
+| 文件 | 大小 |
+|------|:---:|
+| `inference.py` (入口) | 7 KB |
+| `weights/latest_net_G.pth` (v32_vflip) | 912 MB |
+| `weights/breast_seg_930/` (Dataset930) | 354 MB |
+| `weights/breast_seg_910/` (Dataset910) | 809 MB |
+| **权重总计** | **2.1 GB** |
+| **Docker 估算** | **~8.3 GB** (< 10 GB ✅) |
+
+### 推理时间估算 (T4 GPU)
+
+| 步骤 | 时间 |
+|------|:---:|
+| Dataset930 breast seg | ~1s |
+| Dataset910 heart seg | ~1s |
+| GAN × 2 (hflip TTA) | ~1s |
+| De-norm + composite | <0.1s |
+| **总计** | **~3s** (< 10 min ✅) |
+
+**状态**: ✅ **最终提交版本**
 
 ---
 
