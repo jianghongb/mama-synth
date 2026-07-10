@@ -33,7 +33,8 @@ INPUT_SLUG = "pre-contrast-dce-mri-slice-breast"
 OUTPUT_SLUG = "synthetic-contrast-dce-mri-slice-breast"
 
 WEIGHTS_PATH = os.environ.get("MAMA_WEIGHTS_PATH", "/opt/app/weights/latest_net_G.pth")
-BREAST_SEG_PATH = os.environ.get("MAMA_BREAST_SEG_PATH", "/opt/app/weights/breast_seg")
+BREAST_SEG_PATH = os.environ.get("MAMA_BREAST_SEG_PATH",
+                                  "/opt/app/weights/breast_seg/nnUNetTrainer__nnUNetResEncUNetLPlans__2d")
 
 MODEL_SIZE = 512
 NGF = int(os.environ.get("MAMA_NGF", "64"))
