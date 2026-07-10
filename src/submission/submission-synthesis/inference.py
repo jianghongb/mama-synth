@@ -24,6 +24,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+# Fix for PyTorch 2.6+ weights_only default change.
+# nnUNet checkpoints contain numpy objects that require pickle.
+_original_torch_load = torch.load
+def _patched_torch_load(*args, **kwargs):
+    kwargs.setdefault('weights_only', False)
+    return _original_torch_load(*args, **kwargs)
+torch.load = _patched_torch_load
+
 sys.path.insert(0, os.path.dirname(__file__))
 from models.networks import GlobalGenerator
 
