@@ -117,7 +117,7 @@ where $m_b^{\text{soft}}$ is the breast mask smoothed by a Gaussian filter ($\si
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=0.68\textwidth]{figures/inference.pdf}
+\includegraphics[width=0.92\textwidth]{figures/inference.pdf}
 \vspace{-3mm}
 \caption{Inference pipeline. The pre-contrast MRI is segmented, normalized, and concatenated into a 3-channel input. Horizontal-flip TTA averages two forward passes to cancel synthesis noise. The output is de-normalized and blended with the original background via a Gaussian-smoothed breast mask ($\sigma = 5$ pixels).}
 \label{fig:inference_pipeline}
