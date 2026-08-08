@@ -46,6 +46,17 @@ PUBLISHED = {
 }
 
 SLICE_SUFFIX = re.compile(r"_s[+-]\d+$")
+# LA-Breast is named LAB_Mri_<case>_R<n>_val_<running index>, e.g.
+# LAB_Mri_100_R1_val_0000. The R<n> groups appear to be separate ROIs of the
+# same case and the trailing index is a global slice counter, so the patient is
+# everything before _R<n>_val_<index>.
+LAB_SUFFIX = re.compile(r"_R\d+_val_\d+$")
+
+
+def patient_id(stem: str) -> str:
+    """Strip dataset-specific slice suffixes to get the patient identifier."""
+    s = LAB_SUFFIX.sub("", stem)
+    return SLICE_SUFFIX.sub("", s)
 
 
 def say(msg: str = "") -> None:
@@ -67,7 +78,7 @@ def one_slice(args):
         fg = x[m]
         if fg.size < 100:
             return None
-        return (SLICE_SUFFIX.sub("", img_path.stem),
+        return (patient_id(img_path.stem),
                 float(fg.mean()), float(fg.std()),
                 float(x.mean()), float(x.std()))
     except Exception as exc:  # noqa: BLE001 - report and skip unreadable slices
@@ -140,7 +151,8 @@ def main() -> None:
                 say(f"{dataset:<11}no usable slices")
                 continue
             say(f"# {dataset}: {len(rows)}/{len(files)} slices, "
-                f"{len({r[0] for r in rows})} patients")
+                f"{len({r[0] for r in rows})} patients "
+                f"(e.g. {files[0].stem} -> {patient_id(files[0].stem)})")
             report(dataset, rows)
 
     say("The row reproducing the published pair is the convention the Table 1 "
