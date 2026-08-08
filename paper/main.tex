@@ -195,9 +195,9 @@ We read this as MSEC being \emph{subsumed} rather than unsound. On a weaker sing
 
 We nevertheless keep row (4) as our reported configuration, since it is the model we submitted to the challenge and retains MSEC for consistency with the multi-parametric setting it came from~\cite{yang2026miccai}. The two differ by roughly 2\% in $\text{SSIM}_{\text{tumor}}$ and 4\% in FRD and not at all in Dice, but row (5) is the better choice on those two metrics, and a system built afresh for this benchmark should simply omit MSEC.
 
-\begin{figure}[!t]
+\begin{figure}[!b]
 \centering
-\includegraphics[width=0.70\textwidth]{figures/qualitative.pdf}
+\includegraphics[width=0.62\textwidth]{figures/qualitative.pdf}
 \caption{Qualitative results on three test patients from different datasets. Top: DUKE, Middle: ISPY2, Bottom: YUNNAN. Columns: pre-contrast, ground truth, prediction, error map with tumor contour (cyan).}
 \label{fig:qualitative}
 \end{figure}
@@ -205,10 +205,10 @@ We nevertheless keep row (4) as our reported configuration, since it is the mode
 \section{Discussion and Conclusion}
 We presented a tumor-aware conditional GAN for virtual contrast enhancement in breast MRI. Per-image normalization provides a 25\% LPIPS improvement; the conditional tumor mask provides a 14\% Dice increase, addressing complementary failure modes. A third result is negative but useful: the inherited multi-scale consistency constraint stops contributing once those two are present, and removing it improves tumor-region SSIM and FRD. A scanner-invariant intensity scale plus an explicit spatial prior appear to supply what it was there to enforce.
 
-A false positive in $m_t$ does not by itself produce a synthetic lesion, for two reasons. The generator trains on \emph{predicted} masks, so some $m_t{=}1$ regions it saw carried no enhancement in $y$; it learns to treat $m_t$ as a prior to reconcile with the pre-contrast appearance rather than as an instruction. And in residual mode identity is free --- $\Delta{=}0$ reproduces $x$ --- so non-zero $\Delta$ must be earned against masked $L_1$ and perceptual terms that penalize enhancement wherever $y \approx x$. Together these bias the network towards modulating structure already visible in $x$ rather than inventing it. This is a bias, not a guarantee: adversarial training can still synthesize plausible texture, and clinical use would need a dedicated false-positive study.
+A false positive in $m_t$ does not by itself produce a synthetic lesion, for two reasons. The generator trains on \emph{predicted} masks, so some $m_t{=}1$ regions it saw carried no enhancement in $y$; it learns to treat $m_t$ as a prior to reconcile with the pre-contrast appearance, not an instruction. And in residual mode identity is free --- $\Delta{=}0$ reproduces $x$ --- so non-zero $\Delta$ must be earned against masked $L_1$ and perceptual terms that penalize enhancement wherever $y \approx x$. Both bias the network towards modulating structure already visible in $x$. This is a bias, not a guarantee: adversarial training can still synthesize plausible texture, and clinical use would need a dedicated false-positive study.
 
 \paragraph{Limitations.}
-MSE is dominated by outliers, which a robust regression term would temper, and our breast-masked training loss is mismatched with the full-image evaluation protocol --- a low-weight full-image consistency term, or an evaluation mask weighted by anatomical relevance, would close that gap. On the MSEC finding, we tested a single weight and a single formulation, so a smaller $\lambda_{MSEC}$ or a tumor-restricted variant may still help; nor does our result speak to the multi-parametric setting in which the loss was validated~\cite{yang2026miccai}. A weight sweep, model ensembling, and multi-resolution processing are left to future work.
+MSE is dominated by outliers, which a robust regression term would temper, and our breast-masked training loss is mismatched with the full-image evaluation protocol --- a low-weight full-image consistency term, or an evaluation mask weighted by anatomical relevance, would close that gap. On the MSEC finding, we varied one weight and one formulation, so a smaller $\lambda_{MSEC}$ or a tumor-restricted variant may still help, and our result says nothing about the multi-parametric setting the loss was validated in~\cite{yang2026miccai}. A weight sweep, ensembling and multi-resolution processing remain future work.
 
 \bibliographystyle{splncs04}
 \bibliography{references}
