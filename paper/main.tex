@@ -89,7 +89,7 @@ We adapt the GlobalGenerator of Pix2PixHD~\cite{wang2018pix2pixHD}: four strided
 
 \subsection{Training Strategy}
 \paragraph{Dataset and preprocessing.}
-The primary cohort comes from MAMA-MIA~\cite{muller2022mama} as provided by the challenge~\cite{mamasynth2026}. For orientation consistency with the official test set we keep only axial acquisitions (DUKE, ISPY2) and drop the sagittal cohorts (DUKE1, ISPY1, NACT), supplementing with three public cohorts for generalization: YUNNAN~\cite{yunnan2024}, AMBL~\cite{ambl2024}, and LA-Breast~\cite{labreast2023}. To keep the pixel-wise supervisory signal clean, we estimate pre-to-post translation by phase correlation and discard patients displaced by more than 3 pixels (81 ISPY2 patients, i.e.\ all of their slices). For each patient we take the peak-enhancement phase (highest mean tumor intensity) and the axial slice with the largest tumor cross-section, plus its four neighbours ($\pm 1, \pm 2$) to enrich diversity while preserving local coherence --- five slices per volume, 9,504 training slices in total. Images and masks are resampled to $512 \times 512$ with bilinear and nearest-neighbour interpolation respectively.
+The primary cohort comes from MAMA-MIA~\cite{muller2022mama} as provided by the challenge~\cite{mamasynth2026}. For orientation consistency with the official test set we keep only axial acquisitions (DUKE, ISPY2) and drop the sagittal cohorts (DUKE1, ISPY1, NACT), supplementing with three public cohorts for generalization: YUNNAN~\cite{yunnan2024}, AMBL~\cite{ambl2024}, and LA-Breast~\cite{labreast2023}. To keep the pixel-wise supervisory signal clean, we estimate pre-to-post translation by phase correlation and discard patients displaced by more than 3 pixels (81 ISPY2 patients, i.e.\ all of their slices). For each patient we take the peak-enhancement phase (highest mean tumor intensity) and the axial slice with the largest tumor cross-section, plus up to its four neighbours ($\pm 1, \pm 2$) to enrich diversity while preserving local coherence; cohorts whose tumors span fewer slices contribute fewer (AMBL averages 4.1 slices per patient against 5.0 for ISPY2, DUKE and YUNNAN), giving 9,504 training slices in total. Images and masks are resampled to $512 \times 512$ with bilinear and nearest-neighbour interpolation respectively.
 
 \paragraph{Loss Function.}
 All loss terms are spatially restricted to the breast parenchyma via $m_b$, so no capacity is spent on clinically irrelevant background. The joint objective is
@@ -133,17 +133,17 @@ We evaluate on an internal test set comprising 299 slices from 60 patients held 
 
 \begin{table}[t] 
 \centering 
-\caption{Training and testing data composition. Mean and Std are per-slice statistics over all pixels of the pre-contrast slice in global z-score space, reported as avg $\pm$ std across slices; aggregating per patient instead leaves them unchanged to two decimals.} 
+\caption{Training and testing data composition. Mean and Std summarise each cohort in the global z-score space supplied by the challenge: the per-slice mean and standard deviation over breast-foreground pixels of the pre-contrast image, reported as avg $\pm$ std across that cohort's training slices. The single-centre cohorts are tightly clustered; the multi-centre ones (DUKE, ISPY2) are not.} 
 \label{tab:dataset} 
 \begin{tabular}{lccccc} 
 \toprule 
 Dataset & Train slices & Test slices & Resolution & Mean (avg $\pm$ std) & Std (avg $\pm$ std) \\ 
 \midrule 
-ISPY2 & 4267 & 219 & 256--384 & $0.29 \pm 0.56$ & $0.97 \pm 0.72$ \\ 
-AMBL & 2462 & -- & 512 & $-0.30 \pm 0.10$ & $0.30 \pm 0.16$ \\ 
-LA-Breast & 1179 & -- & 448--480 & $-0.40 \pm 0.01$ & $0.12 \pm 0.01$ \\ 
-DUKE & 1124 & 55 & 448--512 & $0.06 \pm 0.48$ & $0.87 \pm 0.78$ \\ 
-YUNNAN & 472 & 25 & 896 & $-0.33 \pm 0.05$ & $0.23 \pm 0.07$ \\ 
+ISPY2 & 4267 & 219 & 256--384 & $0.80 \pm 0.88$ & $0.76 \pm 0.64$ \\ 
+AMBL & 2462 & -- & 512 & $0.63 \pm 0.57$ & $0.62 \pm 0.29$ \\ 
+LA-Breast & 1179 & -- & 448--480 & $-0.20 \pm 0.52$ & $0.21 \pm 0.41$ \\ 
+DUKE & 1124 & 55 & 448--512 & $1.20 \pm 1.30$ & $1.17 \pm 0.92$ \\ 
+YUNNAN & 472 & 25 & 896 & $-0.02 \pm 0.13$ & $0.22 \pm 0.09$ \\ 
 \midrule 
 \textbf{Total} & \textbf{9504} & \textbf{299} & & & \\ 
 \bottomrule 
