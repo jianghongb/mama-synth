@@ -30,7 +30,7 @@
 \author{Hong Jiang \and Zhikai Yang \and Rodrigo Moreno}
 \authorrunning{H. Jiang et al.}
 \institute{KTH Royal Institute of Technology, Stockholm, Sweden\\
-\email{\{hongjia,zhikai,rodmore\}@kth.se}}
+\email{hongjia@kth.se, zhikai@kth.se, rodmore@kth.se}}
 \maketitle
 
 \begin{abstract}
@@ -69,7 +69,7 @@ The challenge data are supplied in a global z-score space, normalized with datas
 x_{\text{norm}} = \frac{x - \mu_{\text{img}}}{\sigma_{\text{img}}}, \qquad
 y_{\text{norm}} = \frac{y - \mu_{\text{img}}}{\sigma_{\text{img}}}
 \end{equation}
-where $\mu_{\text{img}}, \sigma_{\text{img}}$ are computed over breast foreground pixels ($m_b > 0$) of the \emph{pre-contrast} image, with background set to zero. The post-contrast target $y$ is deliberately normalized with the same pre-contrast statistics, placing input and target in a common space so the residual formulation operates on enhancement differences scanner-invariantly. At inference, $\hat{y} = G(x_{\text{norm}}, m_b, m_t) \cdot \sigma_{\text{img}} + \mu_{\text{img}}$.
+where $\mu_{\text{img}}, \sigma_{\text{img}}$ are computed over breast foreground pixels ($m_b > 0$) of the \emph{pre-contrast} image, with background set to zero. In practice $\sigma_{\text{img}}$ is floored at $10^{-8}$, and slices whose breast region covers fewer than 100 pixels fall back to $(\mu,\sigma)=(0,1)$, so the division is always well posed. The post-contrast target $y$ is deliberately normalized with the same pre-contrast statistics, placing input and target in a common space so the residual formulation operates on enhancement differences scanner-invariantly. At inference, $\hat{y} = G(x_{\text{norm}}, m_b, m_t) \cdot \sigma_{\text{img}} + \mu_{\text{img}}$.
 
 \subsection{Tumor-Aware Conditional Input}
 A standard 1-channel generator must learn both \textit{where} and \textit{how much} to enhance. We decouple these by providing a predicted tumor mask as spatial prior. A 2D nnU-Net~\cite{isensee2021nnunet} trained on pre-contrast images predicts $m_t$, which is concatenated as the third input channel:
@@ -162,7 +162,7 @@ Evaluation metrics include: mean squared error (MSE), learned perceptual image p
 \begin{table}[!t]
 \centering
 \small
-\caption{Comparison with diffusion baseline and cumulative ablation on the internal test set (299 slices from 60 patients). Rows (1)--(4) all include the MSEC loss; row (5) removes it from the final configuration. Row (4) is our reported configuration (see text); row (5) scores better on SSIM and FRD. Best values in \textbf{bold}.}
+\caption{Comparison with diffusion baseline and cumulative ablation on the internal test set (299 slices from 60 patients). Rows (1)--(4) include the MSEC loss; row (5) is row (4) with MSEC removed. Best values in \textbf{bold}.}
 \label{tab:merged_results}
 \begin{tabular}{lcccccc}
 \toprule
