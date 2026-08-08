@@ -1,5 +1,5 @@
 % MAMA-SYNTH 2026 Workshop Paper % Springer LNCS Template - Double-blind submission % Deadline: July 15, 2026
-\documentclass[runningheads]{llncs}
+\documentclass[runningheads,a4paper]{llncs}
 \usepackage{graphicx}
 \usepackage{amsmath}
 \usepackage{amssymb}
@@ -19,63 +19,57 @@
 \setlength{\abovecaptionskip}{6pt}
 \setlength{\belowcaptionskip}{4pt}
 
+% Allow TeX slightly more slack before declaring an overfull line. Needed
+% because several long hyphenated terms (e.g. "multi-scale enhancement
+% consistency") otherwise overrun the measure by 1-5pt.
+\setlength{\emergencystretch}{1em}
+
 \begin{document}
 \title{Tumor-Aware Conditional Pix2PixHD with Per-Image Normalization for Virtual Contrast Enhancement in Breast MRI}
 \titlerunning{Tumor-Aware Conditional GAN for Virtual Contrast Enhancement}
-\author{Anonymous}
-\institute{Anonymous Institution}
+\author{Hong Jiang \and Zhikai Yang \and Rodrigo Moreno}
+\authorrunning{H. Jiang et al.}
+\institute{KTH Royal Institute of Technology, Stockholm, Sweden\\
+\email{\{hongjia,zhikai,rodmore\}@kth.se}}
 \maketitle
 
 \begin{abstract}
-Dynamic contrast-enhanced MRI (DCE-MRI) is essential for breast cancer diagnosis but requires gadolinium-based contrast agents that pose safety and accessibility concerns. We present a conditional generative adversarial network for synthesizing post-contrast breast MRI from pre-contrast T1-weighted acquisitions. Our method introduces three key contributions: (1) per-image z-score normalization that eliminates cross-scanner intensity variation, improving perceptual similarity by 25\%; (2) a predicted tumor mask as conditional input that provides the generator with an explicit spatial prior for enhancement localization, improving downstream segmentation Dice by 14\%; and (3) a multi-scale enhancement consistency (MSEC) loss that enforces physically plausible enhancement patterns across multiple spatial scales. On our internal validation set, the method achieves a tumor-region SSIM of 0.509, a downstream segmentation Dice of 0.624, and a 95th-percentile Hausdorff distance (HD95) of 69.4, demonstrating that tumor-aware conditional synthesis can produce clinically meaningful virtual contrast enhancement.
+Dynamic contrast-enhanced MRI (DCE-MRI) is essential for breast cancer diagnosis but requires gadolinium-based contrast agents that pose safety and accessibility concerns. We present a conditional generative adversarial network for synthesizing post-contrast breast MRI from pre-contrast T1-weighted acquisitions. Our method introduces two key contributions, built on a multi-scale enhancement consistency (MSEC) loss inherited from our earlier multi-parametric work: (1) per-image z-score normalization that eliminates cross-scanner intensity variation, improving perceptual similarity by 25\%; and (2) a predicted tumor mask as conditional input that provides the generator with an explicit spatial prior for enhancement localization, improving downstream segmentation Dice by 14\%. On our internal validation set, the method achieves a tumor-region SSIM of 0.509, a downstream segmentation Dice of 0.624, and a 95th-percentile Hausdorff distance (HD95) of 69.4, demonstrating that tumor-aware conditional synthesis can produce clinically meaningful virtual contrast enhancement.
 \end{abstract}
 \keywords{Virtual contrast enhancement \and Breast DCE-MRI \and Conditional GAN \and Image-to-image translation \and Per-image normalization}
 
 % ============================================================================
 \section{Introduction}
 % ============================================================================
-Dynamic contrast-enhanced MRI (DCE-MRI) plays a central role in breast cancer screening, diagnosis, and treatment monitoring~\cite{mann2019breast}. The administration of gadolinium-based contrast agents (GBCAs) enables visualization of tumor vascularity through characteristic enhancement patterns. However, GBCAs introduce concerns regarding patient safety, including nephrogenic systemic fibrosis in patients with renal impairment and gadolinium deposition in neural tissue~\cite{kanda2014gadolinium}. Additionally, contrast-enhanced protocols increase examination time, cost, and environmental impact through pharmaceutical waste.
+Dynamic contrast-enhanced MRI (DCE-MRI) plays a central role in breast cancer screening, diagnosis, and treatment monitoring~\cite{mann2019breast}, but the gadolinium-based contrast agents (GBCAs) it requires raise concerns over patient safety --- including nephrogenic systemic fibrosis and gadolinium deposition in neural tissue~\cite{kanda2014gadolinium} --- as well as examination time, cost, and pharmaceutical waste.
 
-Virtual contrast enhancement (VCE) aims to synthesize post-contrast images from non-contrast acquisitions, potentially reducing or eliminating the need for contrast agent administration. The MAMA-SYNTH 2026 challenge~\cite{mamasynth2026} provides a standardized benchmark for evaluating such methods, requiring synthesis of post-contrast subtraction images from pre-contrast T1-weighted breast MRI.
-This task presents two fundamental challenges. First, MRI intensity values are not standardized across scanners, institutions, and acquisition protocols, leading to large inter-patient variation that confounds learning-based methods. Second, contrast enhancement is spatially heterogeneous --- tumors exhibit strong focal enhancement while normal tissue shows subtle background uptake --- making it critical for synthesis models to correctly localize and modulate enhancement intensity.
+Virtual contrast enhancement (VCE) synthesizes post-contrast images from non-contrast acquisitions, and the MAMA-SYNTH 2026 challenge~\cite{mamasynth2026} provides a standardized benchmark for it. Two difficulties dominate. First, MRI intensities are not standardized across scanners, institutions, and protocols, producing inter-patient variation that confounds learning-based methods. Second, enhancement is spatially heterogeneous --- tumors enhance focally while normal tissue shows subtle background uptake --- so a synthesis model must both localize and modulate it.
 
-We propose a conditional Pix2PixHD framework that addresses both challenges through three key innovations:
-\begin{enumerate}
-\item \textbf{Per-image z-score normalization}: Each image is independently normalized using breast-region statistics, creating a scanner-invariant canonical space for the generator.
-\item \textbf{Tumor-aware conditional input}: A predicted tumor segmentation mask is provided as an additional input channel, giving the generator explicit spatial information about where enhancement should occur.
-\item \textbf{Multi-scale enhancement consistency (MSEC) loss}~\cite{yang2026msec}: A loss term that enforces consistency between the synthesized enhancement pattern and the ground truth across multiple spatial scales.
-\end{enumerate}
+We propose a conditional Pix2PixHD framework addressing both. Our contributions are (1) \textbf{per-image z-score normalization}, which maps each image into a scanner-invariant canonical space using its own breast-region statistics, and (2) a \textbf{tumor-aware conditional input}, which supplies a predicted tumor mask as an extra channel so the generator receives explicit spatial information about where enhancement should occur. Both build on the multi-scale enhancement consistency (MSEC) loss~\cite{yang2026miccai}, adopted unchanged; an ablation isolating its effect shows it to be neutral here.
 
 \paragraph{Related work.}
-GAN-based image-to-image translation has been widely adopted for medical image synthesis. Pix2PixHD~\cite{wang2018pix2pixHD} introduced multi-scale discriminators for high-resolution synthesis. Yang et al.~\cite{yang2026msec} proposed the MSEC loss for breast DCE-MRI synthesis from multi-parametric inputs. Our work differs by operating in a single-modality setting (T1w only), introducing per-image normalization for multi-institutional data, and leveraging predicted tumor masks as spatial conditioning.
+GAN-based image-to-image translation is widely used for medical image synthesis, with Pix2PixHD~\cite{wang2018pix2pixHD} introducing multi-scale discriminators for high-resolution outputs. The MSEC loss was introduced in our earlier work~\cite{yang2026miccai} for DCE-MRI synthesis from multi-parametric inputs; we carry it over unchanged to the harder single-modality (T1w-only) setting. Our contributions relative to that work are per-image normalization for multi-institutional data and predicted tumor masks as spatial conditioning.
 
 % ============================================================================
 \section{Method}
 % ============================================================================
 \subsection{Overview}
-Our pipeline consists of three stages: (1) segmentation of anatomical structures, (2) per-image intensity normalization, and (3) conditional image synthesis with test-time augmentation (TTA). Figure~\ref{fig:pipeline} illustrates the complete training and inference pipeline.
-
-Given a pre-contrast T1-weighted MRI slice $x \in \mathbb{R}^{H \times W}$, we first obtain a binary breast mask $m_b$ and a predicted tumor mask $m_t$ using trained segmentation models. The image is then normalized to a canonical intensity space using breast-region intensity statistics. A conditional generator synthesizes the post-contrast image from the three-channel input $[x_{\text{norm}}, m_b, m_t]$, and the result is de-normalized and composited with the original background.
+Given a pre-contrast T1-weighted slice $x \in \mathbb{R}^{H \times W}$, we obtain a binary breast mask $m_b$ and a predicted tumor mask $m_t$ from trained segmentation models, normalize $x$ to a canonical intensity space using breast-region statistics, synthesize the post-contrast image from the three-channel input $[x_{\text{norm}}, m_b, m_t]$, and de-normalize and composite the result with the original background. Test-time augmentation (TTA) is applied at inference. Figure~\ref{fig:pipeline} shows the training pipeline.
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=\textwidth]{figures/pipeline.pdf}
+\includegraphics[width=0.92\textwidth]{figures/pipeline.pdf}
 \caption{Training pipeline. The pre-contrast input is per-image normalized and concatenated with breast and tumor masks to form a 3-channel input. The generator predicts a residual enhancement map supervised by five masked losses: GAN, feature matching, VGG perceptual, MSEC, and tumor-weighted L1.}
 \label{fig:pipeline}
 \end{figure}
 
 \subsection{Per-Image Z-Score Normalization}
-The multi-institutional dataset is provided in a global z-score space, where all images are normalized using dataset-level mean and standard deviation computed over the entire training set. While this removes absolute intensity differences, substantial inter-scanner variation remains across institutions (Table~\ref{tab:dataset}). We therefore apply a second, per-image normalization using each image's own breast-region statistics:
+The challenge data are supplied in a global z-score space, normalized with dataset-level statistics. This removes absolute intensity offsets but leaves substantial inter-scanner variation (Table~\ref{tab:dataset}), so we apply a second, per-image normalization using each image's own breast-region statistics:
 \begin{equation}
-x_{\text{norm}} = \frac{x - \mu_{\text{img}}}{\sigma_{\text{img}}}
-\end{equation}
-where $x$ is the pre-contrast image within the breast region, $\mu_{\text{img}}$ and $\sigma_{\text{img}}$ are the mean and standard deviation computed over breast foreground pixels ($m_b > 0$). This places all breast pixels in a canonical space (mean=0, std=1) regardless of the original scanner characteristics, while background pixels are set to zero. 
-
-To maintain consistency with this per-image normalization scheme, the post-contrast ground truth target is normalized using the \textbf{same pre-contrast image statistics}:
-\begin{equation}
+x_{\text{norm}} = \frac{x - \mu_{\text{img}}}{\sigma_{\text{img}}}, \qquad
 y_{\text{norm}} = \frac{y - \mu_{\text{img}}}{\sigma_{\text{img}}}
 \end{equation}
-This ensures that both input and target occupy the same normalized canonical space, enabling the residual formulation to operate on enhancement differences in a scanner-invariant manner. At inference, de-normalization restores the original intensity: $\hat{y} = G(x_{\text{norm}}, m_b, m_t) \cdot \sigma_{\text{img}} + \mu_{\text{img}}$.
+where $\mu_{\text{img}}$ and $\sigma_{\text{img}}$ are computed over breast foreground pixels ($m_b > 0$) of the \emph{pre-contrast} image, and background pixels are set to zero. Note that the post-contrast target $y$ is deliberately normalized with the same pre-contrast statistics: this places input and target in a common canonical space, so the residual formulation below operates on enhancement differences in a scanner-invariant manner. At inference, de-normalization restores the original intensity, $\hat{y} = G(x_{\text{norm}}, m_b, m_t) \cdot \sigma_{\text{img}} + \mu_{\text{img}}$.
 
 \subsection{Tumor-Aware Conditional Input}
 A standard 1-channel generator must learn both \textit{where} and \textit{how much} to enhance. We decouple these by providing a predicted tumor mask as spatial prior. A 2D nnU-Net~\cite{isensee2021nnunet} trained on pre-contrast images predicts $m_t$, which is concatenated as the third input channel:
@@ -86,46 +80,27 @@ A standard 1-channel generator must learn both \textit{where} and \textit{how mu
 This allows the generator to focus on enhancement intensity rather than localization.
 
 \paragraph{Provenance and patient-level separation of the segmentation models.}
-Both conditioning masks come from models we trained ourselves for this task rather than external pre-trained checkpoints applied off-the-shelf. The breast segmentor $m_b$ is a 2D nnU-Net distilled from BreastDivider 3D~\cite{rokuss2025breastdivider}; the tumor segmentor $m_t$ is a 2D nnU-Net trained on pre-contrast T1w slices with radiologist-verified tumor annotations as targets. Critically, the tumor segmentor was built \emph{exclusively} from the training split: its nnU-Net dataset was constructed from the same 9,504 train-split slices used for the GAN, and none of the 60 held-out test patients contribute any slice to it. The patient-level separation asserted for the evaluation segmenter (Sec.~\ref{subsec:experiment_setting}) therefore holds identically for the $m_t$-predicting model, and the conditioning input at test time is never informed by ground-truth annotations of test patients. On its own held-out validation fold (1,901 slices from training-cohort patients, nnU-Net's internal 5-fold split) the tumor segmentor reaches a foreground Dice of 0.767.
+The two conditioning masks have different provenance, and neither can leak test-set information. The breast segmentor $m_b$ is a 2D nnU-Net obtained by pseudo-label distillation from an external teacher on public data only: the BreastDivider dataset (\texttt{Bubenpo/BreastDividerDataset}) ships segmentations produced by the 3D BreastDivider model (\texttt{ykirchhoff/Bre\-astDividerModel})~\cite{rokuss2025breastdivider}, and we use those teacher outputs unmodified as targets for a 2D student trained on mid-axial slices with labels binarized to breast versus background. It never observes a MAMA-SYNTH image, so leakage is excluded by construction rather than by a split. The tumor segmentor $m_t$ is trained on our own data, where separation does matter: its nnU-Net dataset was built exclusively from the 9,504 train-split slices used for the GAN, so none of the 60 held-out test patients contribute a slice. The patient-level separation asserted for the evaluation segmenter (Sec.~\ref{subsec:experiment_setting}) therefore holds identically here, and the conditioning input is never informed by test-patient annotations. On its own validation fold (1,901 slices, nnU-Net's internal split) it reaches a foreground Dice of 0.767.
 
-To further verify that the reported gains are not an artifact of annotation leakage, we repeated the final configuration with ground-truth tumor masks substituted for predicted ones at test time. This oracle variant changes downstream Dice only marginally (0.624 $\to$ 0.627) and leaves MSE, LPIPS, and FRD essentially unchanged (1.127, 0.123, 27.04). Since even perfect localization adds almost nothing, the improvement credited to tumor-aware conditioning stems from the conditioning mechanism itself rather than from privileged access to test-set annotations. This also confirms that the design is robust to imperfect predictions: approximate localization is sufficient.
+As a further check against annotation leakage, we re-ran the final configuration with ground-truth tumor masks in place of predicted ones. This oracle variant moves Dice only from 0.624 to 0.627 and leaves MSE, LPIPS, and FRD essentially unchanged (1.127, 0.123, 27.04). Since even perfect localization adds almost nothing, the gain credited to tumor-aware conditioning comes from the conditioning mechanism rather than from privileged access to test annotations --- and the design is evidently robust to imperfect masks.
 
 \subsection{Network Architecture}
-We adapt the GlobalGenerator from Pix2PixHD~\cite{wang2018pix2pixHD}: four strided convolutional layers (ngf=64) compress the $512 \times 512$ three-channel input into a $32 \times 32$ representation, 12 residual blocks model non-linear enhancement patterns, and four transpose convolution layers decode back to full resolution with Instance Normalization throughout.
-
-The generator operates in residual mode, predicting only the enhancement difference map $\Delta$:
-\begin{equation}
-\hat{y}_{\text{norm}} = x_{\text{norm}} + \Delta
-\end{equation}
-This residual formulation ensures anatomical preservation by construction, avoiding wasted capacity on reconstructing the static background.
-
-We employ a multi-scale PatchGAN discriminator~\cite{wang2018pix2pixHD} with two branches at full and half resolutions (3 layers each).
+We adapt the GlobalGenerator of Pix2PixHD~\cite{wang2018pix2pixHD}: four strided convolutions (ngf=64) compress the $512 \times 512$ three-channel input to $32 \times 32$, 12 residual blocks model the enhancement, and four transpose convolutions decode back to full resolution, with Instance Normalization throughout. The generator runs in residual mode, predicting only the enhancement difference $\Delta$ so that $\hat{y}_{\text{norm}} = x_{\text{norm}} + \Delta$; this preserves anatomy by construction and avoids spending capacity on reproducing the static background. The discriminator is a multi-scale PatchGAN~\cite{wang2018pix2pixHD} with two branches (full and half resolution, 3 layers each).
 
 \subsection{Training Strategy}
 \paragraph{Dataset and preprocessing.}
-We evaluate our method using multicenter clinical data. The primary cohort is sourced from the MAMA-MIA dataset~\cite{muller2022mama} provided by the MAMA-SYNTH 2026 challenge~\cite{mamasynth2026}. To maintain spatial orientation consistency with the official challenge test set, we retain only axial acquisitions (DUKE and ISPY2) and exclude sagittal cohorts (DUKE1, ISPY1, and NACT). To enhance model generalization, we supplement with three publicly available cohorts: YUNNAN~\cite{yunnan2024}, AMBL~\cite{ambl2024}, and LA-Breast~\cite{labreast2023}.
-
-To prevent spatial misalignment noise from corrupting the pixel-to-pixel supervisory signal, cases exhibiting significant motion artifacts between pre- and post-contrast phases are excluded. Specifically, we utilize phase correlation to estimate spatial translation and exclude cases with motion displacements exceeding 3 pixels, resulting in only 81 ISPY2 cases removed from the training set, ensuring high spatial alignment between pre- and post-contrast phases.
-For temporal alignment and slice selection, we first identify the peak-enhancement phase for each patient, defined as the DCE phase with the highest mean tumor intensity. We then extract the 2D axial slice exhibiting the largest tumor cross-sectional area. To enrich training diversity while preserving local spatial coherence, we additionally extract the four adjacent slices ($\pm 1$ and $\pm 2$ relative to the index slice), yielding five slices per tumor volume. This pipeline results in a total of 9,504 training slices with corresponding ground-truth post-contrast targets. All images and segmentation masks are resampled to $512 \times 512$ using bilinear and nearest-neighbor interpolation, respectively.
+The primary cohort comes from MAMA-MIA~\cite{muller2022mama} as provided by the challenge~\cite{mamasynth2026}. For orientation consistency with the official test set we keep only axial acquisitions (DUKE, ISPY2) and drop the sagittal cohorts (DUKE1, ISPY1, NACT), supplementing with three public cohorts for generalization: YUNNAN~\cite{yunnan2024}, AMBL~\cite{ambl2024}, and LA-Breast~\cite{labreast2023}. To keep the pixel-wise supervisory signal clean, we estimate pre-to-post translation by phase correlation and discard cases displaced by more than 3 pixels (81 ISPY2 cases). For each patient we take the peak-enhancement phase (highest mean tumor intensity) and the axial slice with the largest tumor cross-section, plus its four neighbours ($\pm 1, \pm 2$) to enrich diversity while preserving local coherence --- five slices per volume, 9,504 training slices in total. Images and masks are resampled to $512 \times 512$ with bilinear and nearest-neighbour interpolation respectively.
 
 \paragraph{Loss Function.}
-To train the generator to synthesize anatomically accurate and clinically viable post-contrast scans, we employ a multi-task objective. All loss terms are spatially constrained within the breast parenchyma via the binary breast mask $m_b$, preventing the generator from allocating capacity to clinically irrelevant background regions. The joint objective is:
+All loss terms are spatially restricted to the breast parenchyma via $m_b$, so no capacity is spent on clinically irrelevant background. The joint objective is
 \begin{equation}
 \mathcal{L}_G = \lambda_{GAN}\mathcal{L}_{GAN} + \lambda_{feat}\mathcal{L}_{feat} + \lambda_{VGG}\mathcal{L}_{VGG} + \lambda_{MSEC}\mathcal{L}_{MSEC} + \lambda_{tumor}\mathcal{L}_{tumor}
 \end{equation}
-
-The \textbf{GAN loss} $\mathcal{L}_{GAN}$ uses a least-squares formulation (LSGAN) with multi-scale PatchGAN discriminators ($D_1$ at full resolution, $D_2$ at half resolution) to encourage high-frequency texture synthesis. The \textbf{feature matching loss} $\mathcal{L}_{feat}$ minimizes the $L_1$ distance between intermediate discriminator features of real and synthesized images, stabilizing training. The \textbf{perceptual loss} $\mathcal{L}_{VGG}$ computes feature-level discrepancies using a pre-trained VGG-19 network, guiding the model toward perceptual similarity beyond pixel-level alignment.
-
-To enforce physical and hemodynamic plausibility, the \textbf{multi-scale enhancement consistency (MSEC)} loss~\cite{yang2026msec} operates on subtraction maps (post-contrast minus pre-contrast):
+where $\mathcal{L}_{GAN}$ is a least-squares (LSGAN) term over the two PatchGAN scales encouraging high-frequency texture, $\mathcal{L}_{feat}$ is the $L_1$ distance between intermediate discriminator features of real and synthesized images (stabilizing training), and $\mathcal{L}_{VGG}$ is a VGG-19 perceptual loss. The \textbf{multi-scale enhancement consistency (MSEC)} loss~\cite{yang2026miccai} acts on subtraction maps to enforce hemodynamic plausibility,
 \begin{equation}
 \mathcal{L}_{MSEC} = \sum_{s=1}^{S} | D_s(\hat{y}_{\text{norm}} - x_{\text{norm}}) - D_s(y_{\text{norm}} - x_{\text{norm}}) |_1
 \end{equation}
-where $D_s$ denotes spatial downsampling to scale $s$ ($S = 3$ scales: $1\times$, $\frac{1}{2}\times$, $\frac{1}{4}\times$). This forces the generator to capture both fine-grained focal enhancement and global contrast-agent distributions. We adopt this term directly from Yang et al.~\cite{yang2026msec} without modification, including its weighting, and it is active in all configurations reported in Section~\ref{subsec:results}.
-
-Since tumors occupy a small fraction of breast volume, standard losses suffer from spatial class imbalance. The \textbf{tumor-weighted loss} applies focused $L_1$ supervision within the tumor region:
-\begin{equation}
-\mathcal{L}_{tumor} = | (\hat{y}_{\text{norm}} - y_{\text{norm}}) \odot m_t |_1
-\end{equation}
+with $D_s$ downsampling to scale $s$ ($S=3$: $1\times$, $\frac{1}{2}\times$, $\frac{1}{4}\times$), capturing both focal and global enhancement. We adopt it unchanged from~\cite{yang2026miccai}, weighting included, and isolate its contribution via the $\lambda_{MSEC}=0$ ablation in Section~\ref{subsec:results}. Finally, since tumors occupy a small fraction of the breast, a \textbf{tumor-weighted} term counters this class imbalance with focused $L_1$ supervision, $\mathcal{L}_{tumor} = | (\hat{y}_{\text{norm}} - y_{\text{norm}}) \odot m_t |_1$.
 
 \paragraph{Data Augmentation.}
 We apply additive Gaussian noise ($\sigma \sim U[0.02, 0.05]$) and random horizontal flipping during training.
@@ -134,18 +109,15 @@ We apply additive Gaussian noise ($\sigma \sim U[0.02, 0.05]$) and random horizo
 We train for 200 epochs with batch size 16, learning rate $3\times10^{-4}$ with linear decay after epoch 100, using Adam optimizer. The hyperparameter $\lambda_{GAN}=1$, $\lambda_{feat}=10$, $\lambda_{VGG}=10$, $\lambda_{MSEC}=50$, $\lambda_{tumor}=10$.
 
 \subsection{Inference Pipeline}
-
-At test time, the inference workflow (Fig.~\ref{fig:inference_pipeline}) proceeds as follows: (1) we acquire the breast mask $m_b$ via a 2D nnU-Net distilled from BreastDivider 3D~\cite{rokuss2025breastdivider}; (2) we predict the tumor mask $m_t$ via nnU-Net on the pre-contrast scan; (3) per-image normalization to the canonical space; (4) 3-channel synthesis with horizontal-flip TTA; (5) de-normalization and background blending.
-
-For TTA, we run the generator on both the original and horizontally-flipped inputs, flip the second output back, and average the two predictions to reduce directional bias. The final output is blended with the original background:
+At test time (Fig.~\ref{fig:inference_pipeline}) we predict $m_b$ and $m_t$ with the two nnU-Nets described above, normalize per image, and synthesize from the 3-channel input using horizontal-flip TTA: the generator is run on the original and the flipped input, the second output is flipped back, and the two are averaged to reduce directional bias. After de-normalization the result is blended with the original background,
 \begin{equation}
 y_{\text{out}} = m_b^{\text{soft}} \cdot \hat{y} + (1 - m_b^{\text{soft}}) \cdot x
 \end{equation}
-where $m_b^{\text{soft}}$ is the breast mask smoothed by a Gaussian filter ($\sigma = 5$ pixels) to eliminate boundary artifacts. Total inference time is $\sim$3s/case on an NVIDIA T4 GPU.
+where $m_b^{\text{soft}}$ is the breast mask smoothed by a Gaussian filter ($\sigma = 5$ pixels) to remove boundary artifacts. Total inference time is $\sim$3\,s/case on an NVIDIA T4 GPU.
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=0.82\textwidth]{figures/inference.pdf}
+\includegraphics[width=0.74\textwidth]{figures/inference.pdf}
 \vspace{-3mm}
 \caption{Inference pipeline. The pre-contrast MRI is segmented, normalized, and concatenated into a 3-channel input. Horizontal-flip TTA averages two forward passes to cancel synthesis noise. The output is de-normalized and blended with the original background via a Gaussian-smoothed breast mask ($\sigma = 5$ pixels).}
 \label{fig:inference_pipeline}
@@ -190,7 +162,7 @@ Evaluation metrics include: mean squared error (MSE), learned perceptual image p
 
 \begin{table}[!t]
 \centering
-\caption{Comparison with diffusion baseline and cumulative ablation on the internal test set (299 cases). Best values in \textbf{bold}.}
+\caption{Comparison with diffusion baseline and cumulative ablation on the internal test set (299 cases). Rows (1)--(4) all include the MSEC loss; row (5) removes it from the final configuration. Best values in \textbf{bold}.}
 \label{tab:merged_results}
 \begin{tabular}{lcccccc}
 \toprule
@@ -203,26 +175,27 @@ SUB-DDPM (50 steps) \cite{ibarra2025diffusion} & 3.233 & 0.316 & 0.029 & 30.26 &
 (1) Global z-score (Baseline) & \textbf{1.101} & 0.157 & 0.394 & 29.66 & 0.493 & 144.9 \\
 (2) + Per-image z-score & 1.236 & 0.117 & 0.476 & 28.45 & 0.539 & 125.6 \\
 (3) + 3ch conditional (tumor mask) & 1.160 & \textbf{0.116} & 0.492 & 28.46 & 0.614 & 76.0 \\
-(4) + Blending \& TTA  & 1.127 & 0.123 & \textbf{0.509} & \textbf{27.06} & \textbf{0.624} & \textbf{69.4} \\
+(4) + Blending \& TTA (full model) & 1.127 & 0.123 & 0.509 & 27.06 & \textbf{0.624} & \textbf{69.4} \\
+\midrule
+\textit{MSEC ablation} & & & & & & \\
+(5) (4) with $\lambda_{MSEC}=0$ & 1.120 & 0.125 & \textbf{0.520} & \textbf{25.83} & \textbf{0.624} & 69.8 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\paragraph{Diffusion baseline comparison.}
-As shown in Table~\ref{tab:merged_results}, we compare against our adaptation of SUB-DDPM and detail the progressive ablation of each component. The diffusion baseline scores poorly on this multi-center test set (SSIM 0.029, Dice 0.072, HD95 419.8). As discussed in Section~\ref{subsec:experiment_setting}, we attribute this primarily to the reduced training set and to the mismatch between the method's per-slice min-max normalization and the globally z-scored inputs of this benchmark, rather than to an inherent limitation of conditional diffusion; the original authors report substantially stronger results under their own preprocessing. Our global z-score baseline outperforms it across all metrics.
+\paragraph{Diffusion baseline and component contributions.}
+The diffusion baseline scores poorly on this multi-center test set (SSIM 0.029, Dice 0.072, HD95 419.8). As discussed in Section~\ref{subsec:experiment_setting}, we attribute this mainly to the reduced training set and to the mismatch between the method's per-slice min-max normalization and the globally z-scored inputs of this benchmark, not to an inherent limit of conditional diffusion; the original authors report substantially stronger results under their own preprocessing. Our global z-score baseline already outperforms it on every metric.
 
-\paragraph{Per-image normalization}
-replaces the traditional global z-score with an image-specific foreground z-score. This strategy reduces LPIPS by 25\% (0.157 $\to$ 0.117) and improves SSIM by 21\% (0.394 $\to$ 0.476), demonstrating that creating a scanner-invariant canonical space is highly effective for perceptual quality. The minor MSE increase (1.101 $\to$ 1.236) reflects the well-known trade-off between pixel-level L2 optimization and perceptual similarity.
+Among our own components, \textbf{per-image normalization} is what buys perceptual quality: it cuts LPIPS by 25\% (0.157 $\to$ 0.117) and raises SSIM by 21\% (0.394 $\to$ 0.476), the small MSE increase (1.101 $\to$ 1.236) reflecting the familiar trade-off between $L_2$ optimization and perceptual similarity. The \textbf{conditional tumor mask} instead drives localization, improving Dice by 14\% (0.539 $\to$ 0.614) and cutting HD95 by 39\% (125.6 $\to$ 76.0); decoupling spatial search from intensity modeling lets the generator concentrate capacity on the tumor. \textbf{Blending and hflip TTA} add final refinements --- TTA averages out high-frequency noise and soft-boundary blending removes edge artifacts --- reaching SSIM 0.509, Dice 0.624, HD95 69.4. Figure~\ref{fig:qualitative} shows qualitative results across the three cohorts.
 
-\paragraph{Conditional tumor mask input}
-provides the largest segmentation and alignment gains, driving a Dice improvement of 14\% (0.539 $\to$ 0.614) and reducing HD95 by 39\% (125.6 $\to$ 76.0). This validates that incorporating tumor localization as an explicit third channel decouples spatial search from intensity modeling, concentrating the generator's capacity on synthetically enhancing the tumor.
+\paragraph{MSEC contributes nothing once normalization and tumor conditioning are in place.}
+Rows (1)--(4) all include MSEC, so the progression above does not isolate it. We therefore retrained the full model with $\lambda_{MSEC}=0$, changing no other hyperparameter, and evaluated it through the identical inference and scoring pipeline; as a control, the $\lambda_{MSEC}=50$ weights re-run through that pipeline reproduced row (4) to four decimal places on all six metrics. Removing MSEC (row 5) leaves Dice unchanged (0.6236 vs.\ 0.6236) and \emph{improves} $\text{SSIM}_{\text{tumor}}$ (0.509 $\to$ 0.520, paired Wilcoxon $p=1\times10^{-4}$, 178/299 cases improved) and FRD (27.06 $\to$ 25.83). The costs are small and confined to LPIPS (0.1233 $\to$ 0.1249, $p<10^{-3}$) and HD95 (69.4 $\to$ 69.8, $p=0.67$, n.s.); the MSE difference is also not significant ($p=0.94$).
 
-\paragraph{Blending and hflip TTA}
-provide final refinements. Test-time augmentation averages out high-frequency generation noise, and soft-boundary blending removes spatial artifacts. Together, they achieve a final SSIM of 0.509, a Dice of 0.624, and HD95 of 69.4. Figure~\ref{fig:qualitative} shows qualitative results across three institutional cohorts.
+We read this as MSEC being \emph{subsumed} by the other two components rather than unsound. In earlier single-channel experiments on a weaker baseline --- global normalization, no tumor conditioning, a Laplacian-pyramid form of the loss at $\lambda=10$ --- multi-scale subtraction supervision gave a small net benefit (e.g.\ Dice $0.251 \to 0.271$), with metrics moving in opposite directions. Once per-image normalization supplies a scanner-invariant intensity scale and the tumor mask supplies explicit localization, the enhancement-map consistency MSEC enforces is largely redundant, and at $\lambda_{MSEC}=50$ it over-constrains the tumor region. We retain MSEC for consistency with the multi-parametric setting in which it was introduced~\cite{yang2026miccai}, but on this single-modality benchmark it is not what drives performance.
 
 \begin{figure}[!t]
 \centering
-\includegraphics[width=0.85\textwidth]{figures/qualitative.pdf}
+\includegraphics[width=0.80\textwidth]{figures/qualitative.pdf}
 \caption{Qualitative results on three cases from different datasets. Top: DUKE, Middle: ISPY2, Bottom: YUNNAN. Columns: pre-contrast, ground truth, prediction, error map with tumor contour (cyan).}
 \label{fig:qualitative}
 \end{figure}
@@ -231,7 +204,7 @@ provide final refinements. Test-time augmentation averages out high-frequency ge
 We presented a tumor-aware conditional GAN for virtual contrast enhancement in breast MRI. Per-image normalization provides a 25\% LPIPS improvement; the conditional tumor mask provides a 14\% Dice increase, addressing complementary failure modes. The residual mode prevents hallucinating tumors from imperfect mask predictions.
 
 \paragraph{Limitations.}
-MSE is dominated by outliers, and the breast-masked training loss is mismatched with the full-image evaluation protocol. A further limitation concerns the MSEC term: we adopt it with the formulation and weighting established by Yang et al.~\cite{yang2026msec} ($\lambda_{MSEC}=50$, $S=3$ scales) and retain it in every configuration of Table~\ref{tab:merged_results}, so the cumulative ablation does not isolate its individual contribution. The reported gains from per-image normalization and tumor-aware conditioning are therefore measured on top of a fixed MSEC-supervised objective, and we do not claim independent evidence for MSEC's effectiveness in this single-modality setting. An ablation with $\lambda_{MSEC}=0$ is left to future work. Further directions include model ensembling and multi-resolution processing.
+MSE is dominated by outliers, and the breast-masked training loss is mismatched with the full-image evaluation protocol. A further limitation concerns the scope of our MSEC finding. The ablation in Section~\ref{subsec:results} shows that at $\lambda_{MSEC}=50$ the loss is neutral for downstream segmentation and mildly harmful for tumor-region structural similarity once per-image normalization and tumor conditioning are present. We tested a single weight and a single formulation, so we cannot rule out that a smaller $\lambda_{MSEC}$, or a tumor-restricted variant, would still help; nor does our result speak to the multi-parametric setting in which the loss was originally validated~\cite{yang2026miccai}. A weight sweep is left to future work. Further directions include model ensembling and multi-resolution processing.
 
 \bibliographystyle{splncs04}
 \bibliography{references}
