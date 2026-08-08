@@ -3,7 +3,7 @@
 #SBATCH -p berzelius
 #SBATCH --gpus=1
 #SBATCH --cpus-per-task=16
-#SBATCH -t 00:30:00
+#SBATCH -t 02:00:00
 #SBATCH -J table1_stats
 #SBATCH -o /proj/berzbiomedicalimagingkth/users/x_honji/table1_stats_%j.log
 #SBATCH -e /proj/berzbiomedicalimagingkth/users/x_honji/table1_stats_%j.err
@@ -69,7 +69,8 @@ if torch.cuda.is_available():
 KEEPALIVE_PID=$!
 trap 'kill $KEEPALIVE_PID 2>/dev/null' EXIT
 
-python recompute_table1_stats.py --root "$DATA_ROOT"
+export PYTHONUNBUFFERED=1
+python -u recompute_table1_stats.py --root "$DATA_ROOT" --workers 16
 
 kill $KEEPALIVE_PID 2>/dev/null
 

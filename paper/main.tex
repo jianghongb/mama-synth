@@ -133,7 +133,7 @@ We evaluate on an internal test set comprising 299 slices from 60 patients held 
 
 \begin{table}[t] 
 \centering 
-\caption{Training and testing data composition. Mean/Std computed over breast foreground pixels in global z-score space.} 
+\caption{Training and testing data composition. Mean and Std are per-slice statistics over all pixels of the pre-contrast slice in global z-score space, reported as avg $\pm$ std across slices; aggregating per patient instead leaves them unchanged to two decimals.} 
 \label{tab:dataset} 
 \begin{tabular}{lccccc} 
 \toprule 
