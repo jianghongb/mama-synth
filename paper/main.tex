@@ -58,7 +58,7 @@ Given a pre-contrast T1-weighted slice $x \in \mathbb{R}^{H \times W}$, we obtai
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=0.86\textwidth]{figures/pipeline.pdf}
+\includegraphics[width=0.94\textwidth]{figures/pipeline.pdf}
 \caption{Training pipeline. The pre-contrast input is per-image normalized and concatenated with breast and tumor masks to form a 3-channel input. The generator predicts a residual enhancement map supervised by five masked losses: GAN, feature matching, VGG perceptual, MSEC, and tumor-weighted L1.}
 \label{fig:pipeline}
 \end{figure}
