@@ -197,12 +197,12 @@ Earlier experiments suggest why. On a weaker single-channel baseline --- global 
 \end{figure}
 
 \section{Discussion and Conclusion}
-We present a tumor-aware conditional GAN for virtual contrast enhancement in breast MRI. Per-image normalization yields a 25\% LPIPS improvement and the conditional tumor mask a 14\% Dice increase, addressing complementary failure modes. The inherited multi-scale consistency constraint, by contrast, becomes largely redundant once both are active: removing it improves tumor-region SSIM and FRD.
+We presented a tumor-aware conditional GAN for breast MRI virtual contrast enhancement. Per-image normalization improves LPIPS by 25\% and the conditional tumor mask improves Dice by 14\%; once both are present the inherited multi-scale consistency (MSEC) constraint is redundant, and removing it improves tumor-region SSIM and FRD.
 
-A false positive in $m_t$ does not force a synthetic lesion. Trained with imperfect predicted masks, the generator learns to treat $m_t$ as a prior to reconcile with the pre-contrast anatomy rather than a definitive instruction; and since the residual formulation defaults to the identity mapping ($\Delta=0$), any enhancement must justify itself under the masked $L_1$ and perceptual losses, which penalize enhancement where $y \approx x$. Both mechanisms bias the network toward modulating existing structures rather than hallucinating new ones. Adversarial training can nonetheless fabricate plausible textures, so clinical deployment would require a dedicated false-positive analysis.
+Two mechanisms limit the effect of a false positive in $m_t$. Trained on imperfect predicted masks, the generator learns to treat $m_t$ as a soft prior rather than an instruction; and because the residual formulation makes $\Delta=0$ the default, any enhancement must justify itself under the masked $L_1$ and perceptual losses, which penalize enhancement where $y \approx x$. Together these bias the model toward modulating existing anatomy rather than hallucinating lesions, though clinical deployment would still require a formal false-positive study.
 
 \paragraph{Limitations.}
-First, MSE is dominated by outliers, which a robust regression term could temper. Second, our breast-masked training loss is mismatched with the full-image evaluation protocol; a low-weight full-image term could close that gap. Third, we evaluated MSEC at one formulation and one weight, so a smaller $\lambda_{MSEC}$ or a tumor-restricted variant might still help, and our observations need not generalize to the multi-parametric setting it was validated in~\cite{yang2026miccai}. Hyperparameter sweeps, ensembling and multi-resolution processing remain future work.
+MSE is dominated by outliers, which a robust regression term could temper, and our breast-masked training loss is mismatched with the full-image evaluation protocol; a low-weight full-image term could close that gap. We also evaluated MSEC at a single formulation and weight, so our findings need not hold at other settings or in the multi-parametric context it was validated in~\cite{yang2026miccai}.
 
 \clearpage
 \bibliographystyle{splncs04}
