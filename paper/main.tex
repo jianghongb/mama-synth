@@ -72,6 +72,7 @@ y_{\text{norm}} = \frac{y - \mu_{\text{img}}}{\sigma_{\text{img}}}
 where $\mu_{\text{img}}, \sigma_{\text{img}}$ are computed over breast foreground pixels ($m_b > 0$) of the \emph{pre-contrast} image, with background set to zero. In practice $\sigma_{\text{img}}$ is floored at $10^{-8}$, and slices whose breast region covers fewer than 100 pixels fall back to $(\mu,\sigma)=(0,1)$, so the division is always well posed. The post-contrast target $y$ is deliberately normalized with the same pre-contrast statistics, placing input and target in a common space so the residual formulation operates on enhancement differences scanner-invariantly. At inference, $\hat{y} = G(x_{\text{norm}}, m_b, m_t) \cdot \sigma_{\text{img}} + \mu_{\text{img}}$.
 
 \subsection{Tumor-Aware Conditional Input}
+\label{subsec:conditional}
 A standard 1-channel generator must learn both \textit{where} and \textit{how much} to enhance. We decouple these by supplying two explicit spatial priors: a breast mask $m_b$ to isolate the parenchyma, and a predicted tumor mask $m_t$ to localize the lesion. Both are predicted by 2D nnU-Nets~\cite{isensee2021nnunet} from pre-contrast images and concatenated to form a 3-channel input:
 \begin{equation}
 \hat{y}_{\text{norm}} = G([x_{\text{norm}}, m_b, m_t])
@@ -197,12 +198,12 @@ Earlier experiments suggest why. On a weaker single-channel baseline --- global 
 \end{figure}
 
 \section{Discussion and Conclusion}
-We presented a tumor-aware conditional GAN for breast MRI virtual contrast enhancement. Per-image normalization improves LPIPS by 25\% and the conditional tumor mask improves Dice by 14\%; once both are present the inherited multi-scale consistency (MSEC) constraint is redundant, and removing it improves tumor-region SSIM and FRD.
+We presented a tumor-aware conditional GAN for breast MRI virtual contrast enhancement. Per-image normalization improves LPIPS by 25\% and the conditional tumor mask improves Dice by 14\%; once both are present the inherited multi-scale consistency (MSEC) constraint is redundant, and removing it improves tumor-region SSIM and FRD. Together with the diffusion baseline, whose per-slice min--max assumption does not survive a globally z-scored input, this suggests that components carried between synthesis settings are worth re-validating rather than inherited.
 
-Two mechanisms limit the effect of a false positive in $m_t$. Trained on imperfect predicted masks, the generator learns to treat $m_t$ as a soft prior rather than an instruction; and because the residual formulation makes $\Delta=0$ the default, any enhancement must justify itself under the masked $L_1$ and perceptual losses, which penalize enhancement where $y \approx x$. Together these bias the model toward modulating existing anatomy rather than hallucinating lesions, though clinical deployment would still require a formal false-positive study.
+Two mechanisms limit the effect of a false positive in $m_t$. Trained on imperfect predicted masks, the generator learns to treat $m_t$ as a soft prior rather than an instruction; and because the residual formulation makes $\Delta=0$ the default, any enhancement must justify itself under the masked $L_1$ and perceptual losses, which penalize enhancement where $y \approx x$. Together these bias the model toward modulating existing anatomy rather than hallucinating lesions. The oracle check of Section~\ref{subsec:conditional} is consistent with this: substituting ground-truth masks at test time moves Dice by 0.003, so the synthesis is largely insensitive to mask error. Clinical deployment would nonetheless require a formal false-positive study, which our evaluation does not provide.
 
 \paragraph{Limitations.}
-MSE is dominated by outliers, which a robust regression term could temper, and our breast-masked training loss is mismatched with the full-image evaluation protocol; a low-weight full-image term could close that gap. We also evaluated MSEC at a single formulation and weight, so our findings need not hold at other settings or in the multi-parametric context it was validated in~\cite{yang2026miccai}.
+MSE is dominated by outliers, which a robust regression term could temper, and our breast-masked training loss is mismatched with the full-image evaluation protocol; a low-weight full-image term could close that gap. An anatomically weighted evaluation mask would be an alternative. We also evaluated MSEC at a single formulation and weight, so our findings need not hold at other settings or in the multi-parametric context it was validated in~\cite{yang2026miccai}. Hyperparameter sweeps, model ensembling and multi-resolution processing remain future work.
 
 \clearpage
 \bibliographystyle{splncs04}
