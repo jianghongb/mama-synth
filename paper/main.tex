@@ -59,12 +59,12 @@ Given a pre-contrast T1-weighted slice $x \in \mathbb{R}^{H \times W}$, we obtai
 \begin{figure}[t]
 \centering
 \includegraphics[width=0.94\textwidth]{figures/pipeline.pdf}
-\caption{Training pipeline. The pre-contrast input is per-image normalized and concatenated with breast and tumor masks to form a 3-channel input. The generator predicts a residual enhancement map supervised by five masked losses: GAN, feature matching, VGG perceptual, MSEC, and tumor-weighted L1.}
+\caption{Training pipeline. The pre-contrast input is per-image normalized and concatenated with breast and tumor masks to form a 3-channel input. The generator predicts a residual enhancement map supervised by five breast region masked losses: GAN (D1/D2), feature matching, VGG perceptual, MSEC, and tumor-weighted L1.}
 \label{fig:pipeline}
 \end{figure}
 
 \subsection{Per-Image Z-Score Normalization}
-While global z-scoring eliminates absolute intensity offsets, it fails to absorb substantial per-scanner differences (see Table~\ref{tab:dataset}). To address this, we introduce a secondary, per-image normalization step based on individual breast-region statistics:
+While global z-scoring eliminates absolute intensity offsets, it fails to absorb substantial per-scanner differences (see Table~\ref{tab:dataset}). To  address this, we introduce a secondary, per-image normalization step based on individual breast-region statistics:
 \begin{equation}
 x_{\text{norm}} = \frac{x - \mu_{\text{img}}}{\sigma_{\text{img}}}, \qquad
 y_{\text{norm}} = \frac{y - \mu_{\text{img}}}{\sigma_{\text{img}}}
@@ -73,13 +73,14 @@ where $\mu_{\text{img}}, \sigma_{\text{img}}$ are computed over breast foregroun
 
 \subsection{Tumor-Aware Conditional Input}
 \label{subsec:conditional}
-A standard 1-channel generator must learn both \textit{where} and \textit{how much} to enhance. We decouple these by supplying two explicit spatial priors: a breast mask $m_b$ to isolate the parenchyma, and a predicted tumor mask $m_t$ to localize the lesion. Both are predicted by 2D nnU-Nets~\cite{isensee2021nnunet} from pre-contrast images and concatenated to form a 3-channel input:
+A standard 1-channel generator must learn both \textit{where} and \textit{how much} to enhance. We decouple these by supplying two explicit spatial priors: a  breast mask $m_b$ to isolate the parenchyma, and a predicted tumor mask $m_t$ to localize the lesion. Both are predicted by 2D nnU-Nets~\cite{isensee2021nnunet} from pre-contrast images and concatenated to form a 3-channel input:
 \begin{equation}
 \hat{y}_{\text{norm}} = G([x_{\text{norm}}, m_b, m_t])
 \end{equation}
 
 \paragraph{Provenance and patient-level separation of the segmentation models.}
 Neither mask can leak the synthesis target, but for different reasons. The breast segmentor is distilled from the public BreastDivider release~\cite{rokuss2025breastdivider}, trained on mid-axial slices against its breast-versus-background labels. BreastDivider aggregates public collections including Duke~\cite{saha2021duke}, ISPY1/2~\cite{newitt2016ispy1,li2022ispy2}, AMBL~\cite{ambl2024} and MAMA-MIA~\cite{muller2022mama} itself, so it overlaps our cohorts by construction: we distil from its first release batch only, in which its identifier mapping places 11 of our 60 test patients, all of DUKE. That overlap leaks nothing we predict: we train on its anatomical labels alone, never on the lesion annotations it also ships, and a breast mask read off pre-contrast anatomy carries no contrast or lesion information. For $m_t$ separation is strict: its dataset was built exclusively from the 9,504 train-split slices, so no test patient contributes a slice, and the separation asserted for the evaluation segmenter (Sec.~\ref{subsec:experiment_setting}) holds here too. On its own validation fold (1,901 slices) it reaches a foreground Dice of 0.767.
+
 
 As a further check against annotation leakage, we re-ran the final configuration with ground-truth tumor masks substituted for the predicted ones at test time. Dice moves only from 0.624 to 0.627, with MSE, LPIPS and FRD essentially unchanged. The predicted masks thus already realize almost all of the benefit perfect localization could give, leaving 0.003 Dice of headroom. So the 14\% gain from tumor conditioning (rows (2)--(3)) cannot stem from privileged access to test annotations --- supplying them outright changes almost nothing --- and the design tolerates the imperfect masks a 0.767-Dice segmentor produces.
 
@@ -183,12 +184,12 @@ SUB-DDPM (50 steps) \cite{ibarra2025diffusion} & 3.233 & 0.316 & 0.029 & 30.26 &
 \end{table}
 
 \paragraph{Diffusion baseline and component contributions.}
-The diffusion baseline scores poorly here (SSIM 0.029, Dice 0.072, HD95 419.8), for the reasons given in Section~\ref{subsec:experiment_setting}; our global z-score baseline already outperforms it on every metric. Among our components, per-image normalization accounts for the gains in perceptual quality: it cuts LPIPS by 25\% (0.157 $\to$ 0.117) and raises SSIM by 21\% (0.394 $\to$ 0.476), the small MSE increase (1.101 $\to$ 1.236) reflecting the familiar tension between pixel-wise error and perceptual similarity. Localization comes instead from the \textbf{conditional tumor mask}, which improves Dice by 14\% (0.539 $\to$ 0.614) and cuts HD95 by 39\% (125.6 $\to$ 76.0): the mask tells the generator where to enhance, so it only has to decide how much. \textbf{Blending and hflip TTA} add the final refinements --- TTA averages out high-frequency noise, soft-boundary blending removes edge artifacts --- reaching SSIM 0.509, Dice 0.624 and HD95 69.4. Figure~\ref{fig:qualitative} shows qualitative results across the three cohorts.
+The diffusion baseline scores poorly here (SSIM 0.029, Dice 0.072, HD95 419.8), for the reasons given in Section~\ref{subsec:experiment_setting}; the global z-score baseline already outperforms it on every metric. Among all components, \textbf{per-image normalization}  accounts for the gains in perceptual quality: it cuts LPIPS by 25\% (0.157 $\to$ 0.117) and raises SSIM by 21\% (0.394 $\to$ 0.476), the small MSE increase (1.101 $\to$ 1.236) reflecting the familiar tension between pixel-wise error and perceptual similarity. Localization comes instead from the \textbf{conditional tumor mask}, which improves Dice by 14\% (0.539 $\to$ 0.614) and cuts HD95 by 39\% (125.6 $\to$ 76.0): the mask tells the generator where to enhance, so it only has to decide how much --- a division that matters because lesions are faint before contrast. \textbf{Blending and hflip TTA} then add final refinements, TTA averaging out high-frequency noise and soft-boundary blending removing edge artifacts, reaching SSIM 0.509, Dice 0.624 and HD95 69.4. Figure~\ref{fig:qualitative} shows qualitative results across the three cohorts.
 
 \paragraph{MSEC brings no net benefit once normalization and tumor conditioning are in place.}
-Rows (1)--(4) all include MSEC, so the progression above cannot isolate it. Retraining the full model with $\lambda_{MSEC}=0$, changing nothing else, and scoring it through the identical pipeline isolates its effect; as a control, the $\lambda_{MSEC}=50$ weights re-run through that pipeline reproduced row (4) to four decimal places on all six metrics. Removing MSEC (row 5) leaves Dice unchanged (0.6236 vs.\ 0.6236) while improving $\text{SSIM}_{\text{tumor}}$ (0.509 $\to$ 0.520, paired Wilcoxon $p=1\times10^{-4}$, 178/299 slices improved) and FRD (27.06 $\to$ 25.83). The costs are small and confined to LPIPS (0.1233 $\to$ 0.1249, $p<10^{-3}$) and HD95 (69.4 $\to$ 69.8, $p=0.67$, n.s.); the MSE difference is likewise not significant ($p=0.94$).
+Rows (1)--(4) all include MSEC, so the progression above cannot isolate it. Retraining the full model with $\lambda_{MSEC}=0$, changing no other hyperparameter, and scoring it through the identical pipeline settles the question; as a control, the $\lambda_{MSEC}=50$ weights re-run through that pipeline reproduced row (4) to four decimal places on all six metrics. Removing MSEC (row 5) leaves Dice unchanged (0.6236 vs.\ 0.6236) while improving $\text{SSIM}_{\text{tumor}}$ (0.509 $\to$ 0.520, paired Wilcoxon $p=1\times10^{-4}$, 178/299 slices improved) and FRD (27.06 $\to$ 25.83). The costs are small and confined to LPIPS (0.1233 $\to$ 0.1249, $p<10^{-3}$) and HD95 (69.4 $\to$ 69.8, $p=0.67$, n.s.); the MSE difference is likewise not significant ($p=0.94$).
 
-Earlier experiments suggest why. On a weaker single-channel baseline --- global normalization, no tumor conditioning, a Laplacian-pyramid form at $\lambda=10$ --- the same supervision did give a small net benefit (Dice $0.251 \to 0.271$). But once per-image normalization supplies a scanner-invariant intensity scale and the mask supplies explicit localization, the consistency MSEC enforces is largely redundant, and at $\lambda_{MSEC}=50$ it over-constrains the tumor region. Row (4) nonetheless remains our reported configuration, being the model submitted to the challenge and retaining MSEC for consistency with the setting it came from~\cite{yang2026miccai}. The two differ by roughly 2\% in $\text{SSIM}_{\text{tumor}}$ and 4\% in FRD and not at all in Dice, so little rides on the choice, though row (5) is preferable on those two metrics and a system built afresh here should omit MSEC.
+On a weaker single-channel baseline --- global normalization, no tumor conditioning, a Laplacian-pyramid form at $\lambda=10$ --- the same supervision did give a small net benefit (Dice $0.251 \to 0.271$). But once per-image normalization supplies a scanner-invariant intensity scale and the mask supplies explicit localization, the consistency MSEC enforces is largely redundant, and at $\lambda_{MSEC}=50$ it over-constrains the tumor region. Row (4) nonetheless remains our reported configuration, being the model we submitted to the challenge and the one that retains MSEC for consistency with the multi-parametric setting it came from~\cite{yang2026miccai}. Both configurations differ by roughly 2\% in $\text{SSIM}_{\text{tumor}}$ and 4\% in FRD and not at all in Dice, so the choice has little practical consequence, although row (5) is preferable on those two metrics, and a system built afresh for this benchmark should simply omit MSEC.
 
 \begin{figure}[!t]
 \centering
@@ -198,17 +199,17 @@ Earlier experiments suggest why. On a weaker single-channel baseline --- global 
 \end{figure}
 
 \section{Discussion and Conclusion}
-We presented a tumor-aware conditional GAN for breast MRI virtual contrast enhancement. Per-image normalization improves LPIPS by 25\% and the conditional tumor mask improves Dice by 14\%; once both are present the inherited multi-scale consistency (MSEC) constraint is redundant, and removing it improves tumor-region SSIM and FRD. Together with the diffusion baseline, whose per-slice min--max assumption does not survive a globally z-scored input, this suggests that components carried between synthesis settings are worth re-validating rather than inherited.
+We presented a tumor-aware conditional GAN for breast MRI virtual contrast enhancement. Per-image normalization improves LPIPS by 25\% and the conditional tumor mask improves Dice by 14\%; once both are present the inherited multi-scale consistency (MSEC) constraint is redundant, and removing it improves tumor-region SSIM and FRD.
 
-Two mechanisms limit the effect of a false positive in $m_t$. Trained on imperfect predicted masks, the generator learns to treat $m_t$ as a soft prior rather than an instruction; and because the residual formulation makes $\Delta=0$ the default, any enhancement must justify itself under the masked $L_1$ and perceptual losses, which penalize enhancement where $y \approx x$. Together these bias the model toward modulating existing anatomy rather than hallucinating lesions. The oracle check of Section~\ref{subsec:conditional} is consistent with this: substituting ground-truth masks at test time moves Dice by 0.003, so the synthesis is largely insensitive to mask error. Clinical deployment would nonetheless require a formal false-positive study, which our evaluation does not provide.
+Importantly, the framework resists false positives in $m_t$. 
+The residual generator treats imperfect $m_t$ masks as soft priors rather than strict instructions. Because generating no enhancement ($\Delta=0$) is the default, ungrounded enhancements where $y \approx x$ are heavily penalized by masked $L_1$ and perceptual losses. This inherently biases the model toward modulating existing anatomy rather than hallucinating lesions, though clinical deployment necessitates formal false-positive studies.
 
 \paragraph{Limitations.}
 MSE is dominated by outliers, which a robust regression term could temper, and our breast-masked training loss is mismatched with the full-image evaluation protocol; a low-weight full-image term could close that gap. An anatomically weighted evaluation mask would be an alternative. We also evaluated MSEC at a single formulation and weight, so our findings need not hold at other settings or in the multi-parametric context it was validated in~\cite{yang2026miccai}.
 
 \paragraph{Future work.}
-Hyperparameter sweeps, model ensembling and multi-resolution processing are natural next steps.
+Addressing these optimization gaps through robust regression, along with multi-resolution processing and comprehensive hyperparameter sweeps, remain key directions for future research.
 
-\clearpage
 \bibliographystyle{splncs04}
 \bibliography{references}
 \end{document}
