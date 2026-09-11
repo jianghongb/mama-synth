@@ -105,19 +105,47 @@ class RadiomicsClassifier:
 
     @staticmethod
     def _fix_xgboost_compat(model: Any) -> None:
-        """Fix deprecated use_label_encoder for XGBClassifier (xgboost >= 1.6).
-        
-        Old models may trigger 'use_label_encoder' access during predict.
-        We ensure the attribute exists and is set to False.
+        """Fix deprecated attributes for XGBClassifier across xgboost versions.
+
+        Old models (trained on GPU with xgboost < 1.7) reference ``gpu_id`` and
+        ``predictor`` during predict, and ``use_label_encoder`` (>= 1.6). Newer
+        xgboost removed ``gpu_id``, raising
+        ``'XGBModel' object has no attribute 'gpu_id'`` at predict time. We
+        restore the missing attributes with harmless defaults.
         """
         try:
             from xgboost import XGBClassifier
         except ImportError:
-            return
+            XGBClassifier = None
+
+        try:
+            from sklearn.linear_model import LogisticRegression
+        except ImportError:
+            LogisticRegression = None
 
         def _patch(obj):
-            if isinstance(obj, XGBClassifier):
+            if XGBClassifier is not None and isinstance(obj, XGBClassifier):
                 obj.use_label_encoder = False
+                # Attributes removed/renamed in xgboost >= 1.7; restore defaults
+                # so a GPU-trained model can predict on CPU.
+                for attr, default in (("gpu_id", None),
+                                      ("predictor", None),
+                                      ("device", "cpu")):
+                    if not hasattr(obj, attr):
+                        try:
+                            setattr(obj, attr, default)
+                        except Exception:
+                            pass
+            # sklearn >= 1.7 removed LogisticRegression.multi_class; models
+            # pickled under older sklearn reference it at predict time, raising
+            # "'LogisticRegression' object has no attribute 'multi_class'".
+            # Restore the historical default ('auto') so predict works.
+            if LogisticRegression is not None and isinstance(obj, LogisticRegression):
+                if not hasattr(obj, "multi_class"):
+                    try:
+                        obj.multi_class = "auto"
+                    except Exception:
+                        pass
 
         # Direct XGBClassifier
         _patch(model)
