@@ -111,7 +111,24 @@ git pull origin dev
 DATAROOT=$PROJ/data_multislice_v3/train
 BREAST_MASK=$PROJ/data_multislice_v3/train/mha/breast_mask
 TUMOR_MASK=$PROJ/data_multislice_v3/train/mha/predicted_tumor
-SEG_W=$PROJ/mama-synth/src/submission/submission-synthesis/weights/tumor_seg_940
+
+# The segmenter for the loss lives in different places on different machines:
+# the nnU-Net results tree on the cluster, where it was trained, and a copy under
+# weights/ locally for the probe and calibration scripts. Large .pth files do not
+# travel in git, so neither location is guaranteed. Take the first candidate that
+# has all three pieces the loss needs.
+SEG_CANDIDATES=(
+  "$PROJ/nnUNet_results/Dataset940_TumorSegT1w/nnUNetTrainer__nnUNetPlans__2d"
+  "$PROJ/mama-synth/src/submission/submission-synthesis/weights/tumor_seg_940"
+  "$PROJ/mama-synth/src/submission/submission-synthesis/weights/tumor_seg"
+)
+SEG_W=""
+for c in "${SEG_CANDIDATES[@]}"; do
+  if [ -f "$c/plans.json" ] && [ -f "$c/dataset.json" ] && \
+     ls "$c"/fold_0/checkpoint_*.pth >/dev/null 2>&1; then
+    SEG_W="$c"; break
+  fi
+done
 
 NUM_TUMOR=$(ls $TUMOR_MASK/*.mha 2>/dev/null | wc -l)
 if [ "$NUM_TUMOR" -lt 100 ]; then
@@ -120,8 +137,17 @@ if [ "$NUM_TUMOR" -lt 100 ]; then
 fi
 
 # The loss is useless if the frozen segmenter is absent or is the scoring one.
-if [ ! -f "$SEG_W/plans.json" ] || [ ! -f "$SEG_W/fold_0/checkpoint_final.pth" ]; then
-    echo "ERROR: segmenter for the loss not found under $SEG_W" >&2
+if [ -z "$SEG_W" ]; then
+    echo "ERROR: no usable segmenter for --lambda_seg. Looked for plans.json," >&2
+    echo "       dataset.json and fold_0/checkpoint_*.pth under:" >&2
+    for c in "${SEG_CANDIDATES[@]}"; do
+        echo "         $c" >&2
+        for p in plans.json dataset.json; do
+            [ -f "$c/$p" ] || echo "           missing $p" >&2
+        done
+        ls "$c"/fold_0/checkpoint_*.pth >/dev/null 2>&1 || \
+            echo "           missing fold_0/checkpoint_*.pth" >&2
+    done
     exit 1
 fi
 if python - "$SEG_W/plans.json" <<'PYEOF'
@@ -137,6 +163,7 @@ fi
 
 echo "=== v34-seg: row (5) + segmentation-consistency loss ==="
 echo "Predicted tumor masks : $NUM_TUMOR"
+echo "Loss segmenter path   : $SEG_W"
 echo "Loss segmenter        : $(python -c "import json;print(json.load(open('$SEG_W/plans.json'))['dataset_name'])")"
 echo "lambda_seg            : 25  (alpha 0.3, beta 0.7, gt-baselined)"
 echo "Changed vs v32_no_msec: --lambda_seg only"
