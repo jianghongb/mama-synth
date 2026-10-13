@@ -104,11 +104,16 @@ class Pix2PixHDModel(BaseModel):
                     beta=getattr(opt, 'seg_tversky_beta', 0.7),
                     gpu_ids=self.gpu_ids,
                     use_gt_baseline=not getattr(opt, 'no_seg_gt_baseline', False),
+                    max_batch=getattr(opt, 'seg_loss_max_batch', 4),
+                    grad_checkpoint=not getattr(opt, 'no_seg_grad_checkpoint', False),
                 )
-                print('[seg loss] %s, alpha=%.2f beta=%.2f, gt_baseline=%s'
+                print('[seg loss] %s, alpha=%.2f beta=%.2f, gt_baseline=%s, '
+                      'max_batch=%d, grad_checkpoint=%s'
                       % (self.criterionSeg.dataset_name,
                          self.criterionSeg.alpha, self.criterionSeg.beta,
-                         self.criterionSeg.use_gt_baseline))
+                         self.criterionSeg.use_gt_baseline,
+                         self.criterionSeg.max_batch,
+                         self.criterionSeg.grad_checkpoint))
                 
         
             # Names so we can breakout loss

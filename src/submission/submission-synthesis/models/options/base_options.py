@@ -87,6 +87,17 @@ class BaseOptions():
         self.parser.add_argument('--seg_tversky_beta', type=float, default=0.7,
                                  help='Tversky weight on false negatives; above alpha so a missed lesion costs '
                                       'more than a spurious one, which is the failure mode Dice and HD95 punish')
+        self.parser.add_argument('--seg_loss_max_batch', type=int, default=4,
+                                 help='cap how many lesion-bearing samples per batch the frozen '
+                                      'segmenter scores. The generator still trains on the full '
+                                      'batch so its dynamics are unchanged; this only bounds the '
+                                      'segmenter activations, which dominate memory at 512x512. '
+                                      '0 = no cap.')
+        self.parser.add_argument('--no_seg_grad_checkpoint', action='store_true',
+                                 help='keep the segmenter activations instead of recomputing them '
+                                      'in the backward pass. Faster by roughly a third but needs '
+                                      'several more GiB; the default trades that for headroom on a '
+                                      '40 GiB card.')
         self.parser.add_argument('--no_seg_gt_baseline', action='store_true',
                                  help='score the absolute Tversky instead of relu(L_fake - L_real). The baseline '
                                       'exists because the segmenter misses some real lesions too (0.05 tumour '

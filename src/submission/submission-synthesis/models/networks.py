@@ -574,7 +574,8 @@ class SegConsistencyLoss(nn.Module):
     """
 
     def __init__(self, weights_dir, fold=0, alpha=0.3, beta=0.7,
-                 gpu_ids=(), use_gt_baseline=True):
+                 gpu_ids=(), use_gt_baseline=True, max_batch=0,
+                 grad_checkpoint=True):
         super().__init__()
         import json
         from pathlib import Path
@@ -613,6 +614,8 @@ class SegConsistencyLoss(nn.Module):
         self.alpha = float(alpha)
         self.beta = float(beta)
         self.use_gt_baseline = bool(use_gt_baseline)
+        self.max_batch = int(max_batch)
+        self.grad_checkpoint = bool(grad_checkpoint)
         self.dataset_name = plans.get('dataset_name', wd.name)
 
     @staticmethod
@@ -655,7 +658,19 @@ class SegConsistencyLoss(nn.Module):
         return (x - m) / s
 
     def _tversky(self, image, mask):
-        prob = torch.softmax(self.net(self._zscore(image)), dim=1)[:, 1:2]
+        x = self._zscore(image)
+        if self.grad_checkpoint and x.requires_grad:
+            # The segmenter's activations at 512x512 dominate the step: stage 0
+            # alone holds batch x 32 x 512 x 512 floats, and they are all retained
+            # for the backward pass through the frozen network. Recomputing them
+            # instead costs roughly a third more time and removes the peak, which
+            # is what matters on a 40 GiB card already holding a 239 M generator,
+            # two discriminators and VGG-19.
+            from torch.utils.checkpoint import checkpoint
+            logits = checkpoint(self.net, x, use_reentrant=False)
+        else:
+            logits = self.net(x)
+        prob = torch.softmax(logits, dim=1)[:, 1:2]
         dims = (1, 2, 3)
         tp = (prob * mask).sum(dim=dims)
         fp = (prob * (1 - mask)).sum(dim=dims)
@@ -672,13 +687,31 @@ class SegConsistencyLoss(nn.Module):
             scalar loss, zero for samples whose mask is empty
         """
         mask = (mask > 0.5).to(fake.dtype)
-        has_tumour = mask.sum(dim=(1, 2, 3)) > 0
-        if not bool(has_tumour.any()):
+        keep = (mask.sum(dim=(1, 2, 3)) > 0).nonzero(as_tuple=True)[0]
+        if keep.numel() == 0:
             return fake.sum() * 0.0
 
-        loss = self._tversky(fake, mask)
+        # Samples without a lesion contribute nothing, so dropping them before the
+        # forward pass saves both time and memory rather than being multiplied out
+        # afterwards. max_batch then caps how many of the rest are scored: the
+        # generator still trains on the full batch, so its dynamics are unchanged,
+        # but the segmenter sees a subset. That makes this gradient noisier while
+        # keeping the peak bounded, which is the trade a 40 GiB card forces.
+        if self.max_batch > 0 and keep.numel() > self.max_batch:
+            keep = keep[:self.max_batch]
+
+        f = fake.index_select(0, keep)
+        m = mask.index_select(0, keep)
+
+        # The baseline is computed first and under no_grad so its activations are
+        # released before the pass that has to retain them. Computing it second,
+        # on top of the retained graph, is what exhausted the card.
+        floor = None
         if self.use_gt_baseline:
             with torch.no_grad():
-                floor = self._tversky(real, mask)
+                floor = self._tversky(real.index_select(0, keep), m)
+
+        loss = self._tversky(f, m)
+        if floor is not None:
             loss = torch.relu(loss - floor)
-        return (loss * has_tumour).sum() / has_tumour.sum()
+        return loss.mean()

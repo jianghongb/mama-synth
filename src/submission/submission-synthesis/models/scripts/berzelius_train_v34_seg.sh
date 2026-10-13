@@ -104,6 +104,9 @@ conda activate $PROJ/envs/gan
 
 pip show torchmetrics > /dev/null 2>&1 || pip install torchmetrics
 export TORCHDYNAMO_DISABLE=1
+# The segmenter's transient activations fragment the pool; the first attempt
+# died with 652 MiB reserved-but-unallocated on a 40 GiB card.
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 cd $PROJ/mama-synth
 git pull origin dev
@@ -211,6 +214,7 @@ python train.py \
   --seg_loss_fold 0 \
   --seg_tversky_alpha 0.3 \
   --seg_tversky_beta 0.7 \
+  --seg_loss_max_batch 4 \
   --num_D 2 \
   --n_layers_D 3 \
   --breast_mask_dir $BREAST_MASK \
