@@ -10,10 +10,10 @@ class Pix2PixHDModel(BaseModel):
     def name(self):
         return 'Pix2PixHDModel'
     
-    def init_loss_filter(self, use_gan_feat_loss, use_vgg_loss, use_tumor_loss=False, use_ssim_loss=False, use_mssc_loss=False, use_edge_loss=False, use_unc_loss=False):
-        flags = (True, use_gan_feat_loss, use_vgg_loss, True, True, use_tumor_loss, use_ssim_loss, use_mssc_loss, use_edge_loss, use_unc_loss)
-        def loss_filter(g_gan, g_gan_feat, g_vgg, d_real, d_fake, g_tumor, g_ssim, g_mssc, g_edge, g_unc):
-            return [l for (l,f) in zip((g_gan,g_gan_feat,g_vgg,d_real,d_fake,g_tumor,g_ssim,g_mssc,g_edge,g_unc),flags) if f]
+    def init_loss_filter(self, use_gan_feat_loss, use_vgg_loss, use_tumor_loss=False, use_ssim_loss=False, use_mssc_loss=False, use_edge_loss=False, use_unc_loss=False, use_seg_loss=False):
+        flags = (True, use_gan_feat_loss, use_vgg_loss, True, True, use_tumor_loss, use_ssim_loss, use_mssc_loss, use_edge_loss, use_unc_loss, use_seg_loss)
+        def loss_filter(g_gan, g_gan_feat, g_vgg, d_real, d_fake, g_tumor, g_ssim, g_mssc, g_edge, g_unc, g_seg):
+            return [l for (l,f) in zip((g_gan,g_gan_feat,g_vgg,d_real,d_fake,g_tumor,g_ssim,g_mssc,g_edge,g_unc,g_seg),flags) if f]
         return loss_filter
     
     def initialize(self, opt):
@@ -83,7 +83,9 @@ class Pix2PixHDModel(BaseModel):
             self.lambda_edge = getattr(opt, 'lambda_edge', 0)
             self.use_edge_loss = self.lambda_edge > 0
             self.use_unc_loss = getattr(opt, 'uncertainty', False)
-            self.loss_filter = self.init_loss_filter(not opt.no_ganFeat_loss, not opt.no_vgg_loss, self.use_tumor_loss, self.use_ssim_loss, self.use_mssc_loss, self.use_edge_loss, self.use_unc_loss)
+            self.lambda_seg = getattr(opt, 'lambda_seg', 0)
+            self.use_seg_loss = self.lambda_seg > 0
+            self.loss_filter = self.init_loss_filter(not opt.no_ganFeat_loss, not opt.no_vgg_loss, self.use_tumor_loss, self.use_ssim_loss, self.use_mssc_loss, self.use_edge_loss, self.use_unc_loss, self.use_seg_loss)
             
             self.criterionGAN = networks.GANLoss(use_lsgan=not opt.no_lsgan, tensor=self.Tensor)   
             self.criterionFeat = torch.nn.SmoothL1Loss() if getattr(opt, 'huber_loss', False) else torch.nn.L1Loss()
@@ -92,10 +94,25 @@ class Pix2PixHDModel(BaseModel):
                 self.criterionVGG = networks.VGGLoss(self.gpu_ids)
             if self.use_mssc_loss:
                 self.criterionMSSC = networks.MSScLoss(levels=getattr(opt, 'mssc_levels', 3))
+            if self.use_seg_loss:
+                # Built once and frozen. Deliberately not the segmenter used for
+                # scoring; see SegConsistencyLoss for why that separation matters.
+                self.criterionSeg = networks.SegConsistencyLoss(
+                    getattr(opt, 'seg_loss_weights'),
+                    fold=getattr(opt, 'seg_loss_fold', 0),
+                    alpha=getattr(opt, 'seg_tversky_alpha', 0.3),
+                    beta=getattr(opt, 'seg_tversky_beta', 0.7),
+                    gpu_ids=self.gpu_ids,
+                    use_gt_baseline=not getattr(opt, 'no_seg_gt_baseline', False),
+                )
+                print('[seg loss] %s, alpha=%.2f beta=%.2f, gt_baseline=%s'
+                      % (self.criterionSeg.dataset_name,
+                         self.criterionSeg.alpha, self.criterionSeg.beta,
+                         self.criterionSeg.use_gt_baseline))
                 
         
             # Names so we can breakout loss
-            self.loss_names = self.loss_filter('G_GAN','G_GAN_Feat','G_VGG','D_real', 'D_fake', 'G_Tumor', 'G_SSIM', 'G_MSSC', 'G_Edge', 'G_Unc')
+            self.loss_names = self.loss_filter('G_GAN','G_GAN_Feat','G_VGG','D_real', 'D_fake', 'G_Tumor', 'G_SSIM', 'G_MSSC', 'G_Edge', 'G_Unc', 'G_Seg')
 
             # initialize optimizers
             # optimizer G
@@ -275,6 +292,13 @@ class Pix2PixHDModel(BaseModel):
         if self.use_mssc_loss:
             loss_G_MSSC = self.criterionMSSC(fake_image, real_image, input_label) * self.lambda_mssc
 
+        # Segmentation consistency: is the synthetic lesion still findable?
+        loss_G_Seg = 0
+        if self.use_seg_loss and mask is not None:
+            mask_gpu = mask.data.cuda() if torch.cuda.is_available() else mask.data
+            loss_G_Seg = self.criterionSeg(
+                fake_image, real_image, mask_gpu) * self.lambda_seg
+
         # Uncertainty-aware heteroscedastic reconstruction loss
         loss_G_Unc = 0
         if log_var is not None:
@@ -309,7 +333,7 @@ class Pix2PixHDModel(BaseModel):
             loss_G_Edge = torch.nn.functional.l1_loss(fake_edge, real_edge) * self.lambda_edge
         
         # Only return the fake_B image if necessary to save BW
-        return [ self.loss_filter( loss_G_GAN, loss_G_GAN_Feat, loss_G_VGG, loss_D_real, loss_D_fake, loss_G_Tumor, loss_G_SSIM, loss_G_MSSC, loss_G_Edge, loss_G_Unc ), None if not infer else fake_image ]
+        return [ self.loss_filter( loss_G_GAN, loss_G_GAN_Feat, loss_G_VGG, loss_D_real, loss_D_fake, loss_G_Tumor, loss_G_SSIM, loss_G_MSSC, loss_G_Edge, loss_G_Unc, loss_G_Seg ), None if not infer else fake_image ]
 
     def inference(self, label, inst, image=None):
         # Encode Inputs        

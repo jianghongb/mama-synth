@@ -72,6 +72,26 @@ class BaseOptions():
         self.parser.add_argument('--lambda_mssc', type=float, default=0, help='weight for Multi-Scale Subtraction Consistency loss (0 = disabled)')
         self.parser.add_argument('--lambda_mssc_grad', type=float, default=0, help='weight for Sobel gradient consistency within MSSC (0 = disabled)')
         self.parser.add_argument('--lambda_edge', type=float, default=0, help='weight for edge (Sobel) loss (0 = disabled)')
+        self.parser.add_argument('--lambda_seg', type=float, default=0,
+                                 help='weight for segmentation-consistency loss: asymmetric Tversky on a '
+                                      'frozen tumour segmenter applied to the synthetic image (0 = disabled). '
+                                      'Targets Dice/HD95 directly rather than through intensity.')
+        self.parser.add_argument('--seg_loss_weights', type=str,
+                                 default='src/submission/submission-synthesis/weights/tumor_seg_940',
+                                 help='nnU-Net directory for --lambda_seg, holding plans.json, dataset.json and '
+                                      'fold_N/. Must NOT be the segmenter used for scoring '
+                                      '(src/evaluation/models/segmentation): routing the loss through the '
+                                      'scoring network optimises the metric instead of the synthesis.')
+        self.parser.add_argument('--seg_loss_fold', type=int, default=0, help='fold of --seg_loss_weights to load')
+        self.parser.add_argument('--seg_tversky_alpha', type=float, default=0.3, help='Tversky weight on false positives')
+        self.parser.add_argument('--seg_tversky_beta', type=float, default=0.7,
+                                 help='Tversky weight on false negatives; above alpha so a missed lesion costs '
+                                      'more than a spurious one, which is the failure mode Dice and HD95 punish')
+        self.parser.add_argument('--no_seg_gt_baseline', action='store_true',
+                                 help='score the absolute Tversky instead of relu(L_fake - L_real). The baseline '
+                                      'exists because the segmenter misses some real lesions too (0.05 tumour '
+                                      'probability on one measured slice against 0.84 on its neighbours), and an '
+                                      'unreachable target pushes the generator to over-enhance.')
         self.parser.add_argument('--stats_file', type=str, default=None, help='path to training_pre_stats.json for z-score→raw conversion')
         self.parser.add_argument('--mssc_levels', type=int, default=3, help='number of Laplacian pyramid levels for MSSC')
         self.parser.add_argument('--square_only', action='store_true', help='only use square (axial) images for training')

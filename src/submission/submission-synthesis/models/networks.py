@@ -538,3 +538,147 @@ class MSScLoss(nn.Module):
             loss = loss + (sub_fake - sub_real).abs().mean()
         return loss / self.levels
 
+
+
+class SegConsistencyLoss(nn.Module):
+    """Asymmetric Tversky on a frozen tumour segmenter's response.
+
+    The other losses ask the synthetic image to look right. This one asks whether
+    it is still *segmentable*: the frozen segmenter is run on the generated
+    post-contrast image and its tumour probability is compared against the
+    ground-truth mask, with gradients flowing back through the frozen network
+    into the generator. It targets Dice and HD95 directly, which the intensity
+    losses only reach indirectly.
+
+    Which segmenter matters more than it looks. The challenge scores Dice and
+    HD95 with Dataset101_mamasynth_firstpost; routing a training loss through
+    that same network would optimise the metric rather than the synthesis, and
+    the resulting score would not mean what it appears to. This loss therefore
+    uses Dataset940_TumorSegT1w, trained for this work on the 9,504 train-split
+    slices alone, so "remains segmentable" stays an independent claim. Keep that
+    separation if the weights are ever swapped.
+
+    The Tversky term is deliberately asymmetric: ``beta`` weights false
+    negatives above ``alpha`` on false positives, so a missed lesion costs far
+    more than a spurious one. A lesion that is rendered but faint is the failure
+    mode the segmentation metrics punish, so that is the one worth pricing high.
+
+    Ground-truth baseline. The segmenter does not find every real lesion either:
+    measured over test slices it assigns a mean tumour probability of 0.72 inside
+    the ground-truth mask, but on one slice only 0.05 while neighbouring slices
+    of the same patient reach 0.84. On such cases an absolute Tversky target is
+    unreachable and would push the generator to over-enhance in pursuit of it.
+    The loss is therefore ``relu(L_fake - L_real)``: nothing is asked of the
+    generator beyond matching what the segmenter can already see in the real
+    image.
+    """
+
+    def __init__(self, weights_dir, fold=0, alpha=0.3, beta=0.7,
+                 gpu_ids=(), use_gt_baseline=True):
+        super().__init__()
+        import json
+        from pathlib import Path
+
+        wd = Path(weights_dir)
+        plans = json.loads((wd / 'plans.json').read_text())
+        ds = json.loads((wd / 'dataset.json').read_text())
+        cfg = plans['configurations']['2d']
+
+        ck_path = wd / f'fold_{fold}' / 'checkpoint_final.pth'
+        if not ck_path.exists():
+            ck_path = wd / f'fold_{fold}' / 'checkpoint_best.pth'
+
+        sd = torch.load(ck_path, map_location='cpu', weights_only=False)
+        sd = sd.get('network_weights', sd.get('state_dict', sd))
+        first = sd.get('encoder.stages.0.0.convs.0.conv.weight')
+        if first is not None and first.dim() == 5:
+            raise ValueError(
+                f'{wd.name} ships 3D weights (kernel {tuple(first.shape[2:])}); '
+                'driving a single 2D slice through it would need a pseudo-volume '
+                'and its probabilities would not be trustworthy. Use a 2D fold.')
+
+        self.net = self._build(cfg, ds)
+        missing, unexpected = self.net.load_state_dict(sd, strict=False)
+        if missing:
+            raise ValueError(
+                f'{len(missing)} weights absent from {ck_path.name} '
+                f'(e.g. {missing[:2]}); part of the segmenter would be random '
+                'and its output useless as a training signal')
+        self.net.eval()
+        for p in self.net.parameters():
+            p.requires_grad_(False)
+        if len(gpu_ids) and torch.cuda.is_available():
+            self.net = self.net.cuda(gpu_ids[0])
+
+        self.alpha = float(alpha)
+        self.beta = float(beta)
+        self.use_gt_baseline = bool(use_gt_baseline)
+        self.dataset_name = plans.get('dataset_name', wd.name)
+
+    @staticmethod
+    def _build(cfg, ds):
+        """Rebuild the nnU-Net architecture from plans.json.
+
+        nnU-Net's predictor wraps the network in sliding-window inference,
+        test-time mirroring and an argmax, none of which is differentiable end to
+        end. The network itself is an ordinary module, so it is instantiated
+        directly and driven in one pass, which keeps the graph intact.
+        """
+        from dynamic_network_architectures.architectures.unet import PlainConvUNet
+
+        kw = dict(cfg['architecture']['arch_kwargs'])
+        for key in ('conv_op', 'norm_op', 'nonlin', 'dropout_op'):
+            val = kw.get(key)
+            if isinstance(val, str):
+                mod, _, name = val.rpartition('.')
+                kw[key] = getattr(__import__(mod, fromlist=[name]), name)
+        return PlainConvUNet(
+            input_channels=len(ds['channel_names']),
+            num_classes=len(ds['labels']),
+            deep_supervision=False,
+            **kw,
+        )
+
+    @staticmethod
+    def _zscore(x):
+        """Per-image z-score, matching the segmenter's ZScoreNormalization.
+
+        In residual mode the generator output is unbounded, so its scale drifts
+        over training. nnU-Net normalises each image by its own mean and standard
+        deviation, and applying the same transform here means the segmenter sees
+        inputs in the range it was trained on regardless of that drift. Statistics
+        are taken per sample rather than per batch so one bright slice cannot
+        shift the others.
+        """
+        m = x.mean(dim=(1, 2, 3), keepdim=True)
+        s = x.std(dim=(1, 2, 3), keepdim=True).clamp_min(1e-8)
+        return (x - m) / s
+
+    def _tversky(self, image, mask):
+        prob = torch.softmax(self.net(self._zscore(image)), dim=1)[:, 1:2]
+        dims = (1, 2, 3)
+        tp = (prob * mask).sum(dim=dims)
+        fp = (prob * (1 - mask)).sum(dim=dims)
+        fn = ((1 - prob) * mask).sum(dim=dims)
+        return 1 - (tp + 1e-6) / (tp + self.alpha * fp + self.beta * fn + 1e-6)
+
+    def forward(self, fake, real, mask):
+        """
+        Args:
+            fake: generated post-contrast [B,1,H,W]
+            real: ground-truth post-contrast [B,1,H,W]
+            mask: ground-truth tumour mask [B,1,H,W], binary
+        Returns:
+            scalar loss, zero for samples whose mask is empty
+        """
+        mask = (mask > 0.5).to(fake.dtype)
+        has_tumour = mask.sum(dim=(1, 2, 3)) > 0
+        if not bool(has_tumour.any()):
+            return fake.sum() * 0.0
+
+        loss = self._tversky(fake, mask)
+        if self.use_gt_baseline:
+            with torch.no_grad():
+                floor = self._tversky(real, mask)
+            loss = torch.relu(loss - floor)
+        return (loss * has_tumour).sum() / has_tumour.sum()
