@@ -589,6 +589,13 @@ def run_evaluation(
         ),
     ]
 
+    # Optional: skip the (slow) segmentation evaluator, e.g. to re-run only the
+    # classification evaluator for a backfilled AUROC without repeating the
+    # ~45 min nnU-Net segmentation. Set MAMA_SKIP_SEG=1.
+    if os.environ.get("MAMA_SKIP_SEG", "").lower() in ("1", "true", "yes"):
+        evaluators = [(n, e) for (n, e) in evaluators if n != "Segmentation"]
+        logger.info("MAMA_SKIP_SEG set — segmentation evaluator skipped.")
+
     all_per_case: dict[str, dict[str, float]] = {}
     all_aggregates: dict[str, dict[str, float]] = {}
 
