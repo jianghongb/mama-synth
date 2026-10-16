@@ -96,6 +96,39 @@ class DinoFeat:
         return F.normalize(f, dim=-1).flatten()
 
 
+class Dinov3ConvNextFeat:
+    """DINOv3 ConvNeXt-S multi-scale features.
+
+    Geometrically this is the candidate that actually fits. At 512 input it
+    returns 128/64/32/16 maps, so stage 2 lands exactly on the generator's 32x32
+    bottleneck and the set mirrors the multi-scale structure VGGLoss already
+    uses, which means it could replace VGGLoss without changing its interface.
+    The patch-14 ViT cannot: 512 is not a multiple of 14, so it needs a resample
+    to 518 and its 1369 tokens have to be interpolated back onto a spatial grid.
+
+    Stages are concatenated after per-stage L2 normalisation so that no single
+    stage dominates by virtue of having more elements.
+    """
+
+    name = "DINOv3 ConvNeXt-S"
+    size = 512
+
+    def __init__(self, dev):
+        import os
+        os.environ["HF_HUB_DISABLE_IMPLICIT_TOKEN"] = "1"
+        import timm
+        self.net = timm.create_model("convnext_small.dinov3_lvd1689m",
+                                     pretrained=True, features_only=True).to(dev).eval()
+        for p in self.net.parameters():
+            p.requires_grad_(False)
+        self.dev = dev
+
+    @torch.no_grad()
+    def __call__(self, x):
+        fs = self.net(to_network_input(x, self.size).to(self.dev))
+        return torch.cat([F.normalize(f.flatten(1), dim=-1).flatten() for f in fs])
+
+
 class VggFeat:
     """VGG-19 relu activations, the loss the GAN uses today."""
 
@@ -139,9 +172,50 @@ def collect_cases(n):
     return out
 
 
+def test_error_alignment(ex, cases, preds_dir):
+    """Does feature distance track how wrong the synthesised enhancement is?
+
+    This is the test that matters, because it reproduces what the loss actually
+    does. The first test uses real pre/post pairs, but the perceptual loss acts
+    between a synthesised image and the real one, and pix2pixHD_model.py:268
+    feeds it fake_masked and real_masked, i.e. restricted to the breast. Both
+    are mirrored here: real predictions from the row (5) baseline, multiplied by
+    the breast mask.
+
+    For every case it measures the feature distance d(prediction, ground truth)
+    and the error in mean tumour enhancement, then correlates them. A perceptual
+    loss descends the first quantity, so it only improves enhancement accuracy
+    to the extent that the first tracks the second. A rho near zero means
+    descending this feature distance carries no information about getting the
+    enhancement right, whatever else it may be enforcing.
+    """
+    from scipy.stats import spearmanr
+
+    dists, errors = [], []
+    for name, _ in cases:
+        p = preds_dir / name
+        if not p.exists():
+            continue
+        pred, gt = read(p), read(DATA / "ground_truth" / name)
+        pre = read(DATA / "input" / name)
+        breast = read(DATA / "breast_mask" / name) > 0.5
+        tumour = read(DATA / "mask" / name) > 0.5
+        if tumour.sum() < 50:
+            continue
+        dists.append(float((ex(pred * breast) - ex(gt * breast)).norm()))
+        errors.append(abs(float((pred - pre)[tumour].mean())
+                          - float((gt - pre)[tumour].mean())))
+    if len(dists) < 8:
+        return None
+    rho, p = spearmanr(dists, errors)
+    return dict(rho=float(rho), p=float(p), n=len(dists))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=40, help="number of cases")
+    ap.add_argument("--preds", default=str(REPO / "predictions_v32_no_msec"),
+                    help="row (5) baseline predictions, for the error-alignment test")
     args = ap.parse_args()
 
     dev = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
@@ -149,10 +223,11 @@ def main():
     if not cases:
         print("no usable cases found")
         return 1
-    print(f"device: {dev}   cases: {len(cases)}\n")
+    preds_dir = Path(args.preds)
+    print(f"device: {dev}   cases: {len(cases)}   preds: {preds_dir.name}\n")
 
     results = {}
-    for Extractor in (VggFeat, DinoFeat):
+    for Extractor in (VggFeat, DinoFeat, Dinov3ConvNextFeat):
         ex = Extractor(dev)
         sep, enh, act = [], [], []
         for name, nb_name in cases:
@@ -171,11 +246,12 @@ def main():
         sep = np.array(sep); enh = np.array(enh)
         from scipy.stats import spearmanr
         rho, p = spearmanr(sep, enh)
+        align = test_error_alignment(ex, cases, preds_dir) if preds_dir.is_dir() else None
         results[ex.name] = dict(
             sep_mean=float(sep.mean()), sep_median=float(np.median(sep)),
             sep_min=float(sep.min()), sep_max=float(sep.max()),
             rho=float(rho), p=float(p), act_mean=float(np.mean(act)),
-            dead=float(np.mean([a < 1e-6 for a in act])))
+            dead=float(np.mean([a < 1e-6 for a in act])), align=align)
         del ex
 
     print("=== 1. separation: enhancement against ordinary anatomical variation ===")
@@ -197,27 +273,45 @@ def main():
     for k, v in results.items():
         print(f"  {k:<22}{v['act_mean']:>12.4f}{v['dead']:>11.2f}")
 
-    vgg, dino = results["VGG-19 (current)"], results["DINOv2 ViT-S/14"]
+    print("\n=== 4. the test that matches how the loss is used ===")
+    print("    d(prediction, ground truth) on breast-masked images, as in")
+    print("    pix2pixHD_model.py:268, against the error in mean tumour")
+    print("    enhancement. The loss descends this distance, so a rho near zero")
+    print("    means descending it says nothing about enhancement accuracy.\n")
+    print(f"  {'feature':<22}{'rho':>8}{'p':>10}{'n':>5}")
+    for k, v in results.items():
+        a = v["align"]
+        if a:
+            print(f"  {k:<22}{a['rho']:>+8.3f}{a['p']:>10.4f}{a['n']:>5}")
+        else:
+            print(f"  {k:<22}{'n/a':>8}")
+
     print("\n=== reading ===")
-    better_sep = dino["sep_mean"] > vgg["sep_mean"]
-    better_rho = abs(dino["rho"]) > abs(vgg["rho"])
-    print(f"  DINO separates enhancement better : {better_sep} "
-          f"({dino['sep_mean']:.2f} vs {vgg['sep_mean']:.2f})")
-    print(f"  DINO tracks magnitude better      : {better_rho} "
-          f"(rho {dino['rho']:+.3f} vs {vgg['rho']:+.3f})")
-    if better_sep and better_rho:
-        print("  -> a DINO perceptual loss is worth one ablation run")
-    elif not better_sep and not better_rho:
-        print("  -> DINO features are not more informative about enhancement here.")
-        print("     Swapping the perceptual loss would not be motivated, and an")
-        print("     in-domain pretraining effort is the only route left that could")
-        print("     change this.")
-    else:
-        print("  -> mixed. The two criteria disagree, so the case is not clear and")
-        print("     the cheaper experiment is still the perceptual-loss swap.")
+    vgg = results["VGG-19 (current)"]
+    for k, v in results.items():
+        if k == "VGG-19 (current)":
+            continue
+        a, av = v["align"], vgg["align"]
+        print(f"  {k} against VGG-19:")
+        print(f"    separation       {v['sep_mean']:.2f} vs {vgg['sep_mean']:.2f}"
+              f"   {'better' if v['sep_mean'] > vgg['sep_mean'] else 'worse'}")
+        print(f"    magnitude rho    {v['rho']:+.3f} vs {vgg['rho']:+.3f}"
+              f"   {'better' if abs(v['rho']) > abs(vgg['rho']) else 'worse'}")
+        if a and av:
+            print(f"    error alignment  {a['rho']:+.3f} vs {av['rho']:+.3f}"
+                  f"   {'better' if a['rho'] > av['rho'] else 'worse'}"
+                  f"  (p {a['p']:.4f} vs {av['p']:.4f})")
+    print("\n  Test 4 carries the most weight: it is the only one measured on")
+    print("  synthetic output under the masking the loss actually applies. If no")
+    print("  feature space shows a significant positive rho there, then no")
+    print("  perceptual loss built on these features supervises enhancement")
+    print("  accuracy, and swapping one for another cannot help. That would make")
+    print("  the v35 ablation (--no_vgg_loss) the informative experiment and")
+    print("  leave in-domain pretraining as the only route that could change it.")
 
     out = REPO / "scripts" / "dino_probe.json"
-    out.write_text(json.dumps({"n_cases": len(cases), "results": results}, indent=2))
+    out.write_text(json.dumps({"n_cases": len(cases), "preds": str(preds_dir),
+                               "results": results}, indent=2))
     print(f"\nwrote {out}")
     return 0
 

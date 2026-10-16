@@ -1,0 +1,30 @@
+{
+  "cohorts": {
+    "DUKE": {
+      "patients": 291,
+      "volumes": 1288,
+      "slices": 216880
+    },
+    "ISPY2": {
+      "patients": 980,
+      "volumes": 5870,
+      "slices": 621174
+    },
+    "YUNNAN": {
+      "patients": 100,
+      "volumes": 601,
+      "slices": 85128
+    }
+  },
+  "total_slices": 923182,
+  "stride": 3,
+  "sample": 12,
+  "keep_rate": 0.9485038274182325,
+  "usable_estimate": 291880,
+  "proxy": {
+    "dice_mean": 0.5353608654300122,
+    "dice_median": 0.4717606971009546,
+    "recall_mean": 0.8306316066059249,
+    "n": 40
+  }
+}

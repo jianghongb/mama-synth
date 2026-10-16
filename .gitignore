@@ -237,3 +237,5 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+# regenerable from build_pretrain_manifest.py, 1.2 MB of volume paths
+scripts/pretrain_manifest.json
