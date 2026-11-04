@@ -51,7 +51,10 @@ cd $PROJ/mama-synth
 # scipy.ndimage supplies the dilation and erosion. envs/gan runs training, so it
 # has numpy, but scipy has not been needed by it before.
 python - <<'PY' || exit 1
-import importlib, sys
+# importlib.util is a submodule and is not bound by `import importlib` alone,
+# so it has to be imported explicitly.
+import importlib.util
+import sys
 missing = [m for m in ("numpy", "scipy", "SimpleITK") if importlib.util.find_spec(m) is None]
 if missing:
     print(f"ERROR: envs/gan is missing {missing}.")
